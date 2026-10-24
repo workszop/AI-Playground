@@ -1,5 +1,7 @@
 # Kids-safe AI Playground on Windows: build, install, test
 
+This is a fork of [Intel AI Playground](https://github.com/intel/AI-Playground) with content filters for children: chat messages, chat replies and image prompts are checked by a safety model, and generated images by an image filter. Intel's original readme is in [README-intel.md](README-intel.md).
+
 This guide is for people who want to run the kids-safe fork of AI Playground on a Windows PC. It covers three things:
 
 1. [Building the installer](#2-build-the-installer) from the fork's source code (there is no ready-made download).
@@ -100,7 +102,7 @@ cd AI-Playground
 git branch --show-current
 ```
 
-The last command must print `kids-safe`. It is the fork's default branch, so a plain clone gets it. If it prints anything else, run `git checkout kids-safe`.
+The last command must print `main`. If it prints anything else, run `git checkout main`.
 
 ### 2.4 One-time setup
 
@@ -315,7 +317,7 @@ Settings > Apps > Installed apps > AI Playground > Uninstall, from the parent's 
 | Downloads fail during `npm run setup` | Check the internet connection and turn off company VPNs. Behind a proxy, set `$env:https_proxy` and `$env:http_proxy` to the proxy address before running the commands |
 | `Filename too long` during `git clone` or `npm` | Run `git config --global core.longpaths true` and use a short folder such as `C:\src` |
 | Errors mentioning `node-gyp`, `MSBuild` or `better-sqlite3` | A native module could not use a prebuilt binary. Install "Build Tools for Visual Studio" with the **Desktop development with C++** workload, then run `npm run setup` again |
-| The build stops with TypeScript errors | The source is not in a clean state. Run `git status`; if you changed files, undo the changes or check out `kids-safe` again |
+| The build stops with TypeScript errors | The source is not in a clean state. Run `git status`; if you changed files, undo the changes or check out `main` again |
 
 ### Installing and running
 

@@ -41,7 +41,7 @@ Figure 2: Screenshot of user interface using the default color theme, with the A
 <img width="1635" height="920" alt="AI Playground default theme with app and prompt settings" src="docs/readme/ui-dark-settings.png" />
 
 ## README.md
-- English (readme.md)
+- English (README-intel.md)
 
 ## Min Specs
 AI Playground alpha and beta installers are currently available downloadable executables, or available as a source code from our Github repository.  To run AI Playground you must have a PC that meets the following specifications

@@ -56,4 +56,4 @@ No filter is perfect. On a 50-prompt Polish test set the 4B guard plus the word 
 
 ## Installing on Windows
 
-See [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) for building the installer, installing it for a child and the test checklist.
+See [README.md](README.md) for building the installer, installing it for a child and the test checklist.

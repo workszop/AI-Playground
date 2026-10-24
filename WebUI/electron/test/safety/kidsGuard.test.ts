@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from 'ai'
 
@@ -232,6 +232,7 @@ describe('guard calls', () => {
     setKidsGuardDeps(null)
     vi.unstubAllGlobals()
     fetchMock.mockReset()
+    rmSync(modelDir, { recursive: true, force: true })
   })
 
   const answer = (content: string) => answerWith(fetchMock, content)
@@ -333,6 +334,7 @@ describe('guard placement fallback', () => {
     setKidsGuardDeps(null)
     vi.unstubAllGlobals()
     fetchMock.mockReset()
+    rmSync(modelDir, { recursive: true, force: true })
   })
 
   const wire = (plan: GuardPlan, overrides: Partial<KidsGuardDeps> = {}) => {

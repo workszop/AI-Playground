@@ -30,6 +30,7 @@ import getPort, { portNumbers } from 'get-port'
 import { binary, extract, restoreTreeWritePermissions } from '../install/tools.ts'
 import * as llamaCppPhison from './llamaCppPhison.ts'
 import type { LlamaCppBuildVariant } from './llamaCppPhison.ts'
+import type { GuardPlacement } from '../../safety/guardPlacement.ts'
 
 const execAsync = promisify(exec)
 
@@ -261,12 +262,64 @@ export function buildLlmServerArgs(options: {
   ]
 }
 
+/** Guard server args for a placement; never carries the user's startup parameters, `--host` stays last. */
+export function buildGuardServerArgs(options: {
+  modelPath: string
+  port: number
+  placement: GuardPlacement
+}): string[] {
+  const { placement } = options
+  const deviceArgs =
+    placement.device.kind === 'gpu'
+      ? ['--device', placement.device.llamaDeviceId, '--gpu-layers', '999', '-t', '2']
+      : [
+          '--device',
+          'none',
+          '--gpu-layers',
+          '0',
+          '-t',
+          placement.threads.toString(),
+          '-tb',
+          placement.batchThreads.toString(),
+        ]
+  return [
+    '--model',
+    options.modelPath,
+    '--port',
+    options.port.toString(),
+    // Two slots of 3072 tokens: kidsGuard pins prompt and reply checks to one each.
+    '--ctx-size',
+    '6144',
+    '--parallel',
+    '2',
+    '--jinja',
+    '--log-prefix',
+    ...deviceArgs,
+    '--host',
+    '127.0.0.1',
+  ]
+}
+
+function sameGuardPlacement(a: GuardPlacement, b: GuardPlacement): boolean {
+  const sameDevice =
+    a.device.kind === b.device.kind &&
+    (a.device.kind !== 'gpu' ||
+      (b.device.kind === 'gpu' && a.device.llamaDeviceId === b.device.llamaDeviceId))
+  return (
+    sameDevice &&
+    a.model === b.model &&
+    a.threads === b.threads &&
+    a.batchThreads === b.batchThreads
+  )
+}
+
 interface LlamaServerProcess {
   process: ChildProcess
   port: number
   modelPath: string
   modelRepoId: string
   type: 'llm' | 'embedding' | 'guard'
+  placement?: GuardPlacement
   contextSize?: number
   isReady: boolean
 }
@@ -511,20 +564,46 @@ export class LlamaCppBackendService implements ApiService {
    * It never takes the user's startup parameters, so nothing typed in settings
    * can change how the guard runs. Resolves to the server's base URL.
    */
-  async ensureGuardServer(modelPath: string): Promise<string> {
+  async ensureGuardServer(modelPath: string, placement: GuardPlacement): Promise<string> {
     if (!this.isSetUp) throw new Error('The Llama.cpp backend is not installed')
     const running = this.llamaGuardProcess
-    if (running?.isReady && running.modelPath === modelPath && running.process.exitCode === null) {
+    if (
+      running?.isReady &&
+      running.modelPath === modelPath &&
+      running.placement &&
+      sameGuardPlacement(running.placement, placement) &&
+      running.process.exitCode === null
+    ) {
       return `http://127.0.0.1:${running.port}`
     }
     this.guardServerStarting ??= (async () => {
       await this.stopLlamaGuardServer()
-      return this.startLlamaGuardServer(modelPath)
+      return this.startLlamaGuardServer(modelPath, placement)
     })().finally(() => {
       this.guardServerStarting = null
     })
     const started = await this.guardServerStarting
     return `http://127.0.0.1:${started.port}`
+  }
+
+  /** The running guard's placement, or null when no guard is up. */
+  guardPlacement(): GuardPlacement | null {
+    const running = this.llamaGuardProcess
+    return running?.isReady && running.placement ? running.placement : null
+  }
+
+  /** Stop the LLM and embedding servers (and the guard unless kept) with `stop()`'s status bookkeeping. */
+  async stopChatServersForMedia(options: { keepGuard: boolean }): Promise<void> {
+    this.appLogger.info(
+      `Stopping chat servers for media (keepGuard=${options.keepGuard}). It was in state ${this.currentStatus}`,
+      this.name,
+    )
+    this.desiredStatus = 'stopped'
+    this.setStatus('stopping')
+    await this.stopLlamaLlmServer()
+    await this.stopLlamaEmbeddingServer()
+    if (!options.keepGuard) await this.stopLlamaGuardServer()
+    this.setStatus('stopped')
   }
 
   /**
@@ -1438,6 +1517,17 @@ export class LlamaCppBackendService implements ApiService {
     return this.selectedDevice()?.id
   }
 
+  /** Guard env: the Vulkan selector only for a gpu placement (`Vulkan0` selects index 0). */
+  private guardServerEnv(placement: GuardPlacement): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      ...(placement.device.kind === 'gpu'
+        ? vulkanDeviceSelectorEnv(placement.device.llamaDeviceId.replace(/^[A-Za-z]+(?=\d+$)/, ''))
+        : {}),
+      ...llamaCppPhison.getModelServerEnvAdditions(this.llamaCppBuildVariant),
+    }
+  }
+
   /** Env only for on-demand llama-server processes (LLM / embedding). Phison build uses GGML_VK_DISABLE_F16. */
   private llamaModelServerEnv(): NodeJS.ProcessEnv {
     return {
@@ -1814,28 +1904,16 @@ export class LlamaCppBackendService implements ApiService {
     }
   }
 
-  private async startLlamaGuardServer(modelPath: string): Promise<LlamaServerProcess> {
+  private async startLlamaGuardServer(
+    modelPath: string,
+    placement: GuardPlacement,
+  ): Promise<LlamaServerProcess> {
     const port = await getPort({ port: portNumbers(39300, 39399) })
     this.appLogger.info(`Starting guard server ${modelPath} on port ${port}`, this.name)
-    const args = [
-      '--model',
-      modelPath,
-      '--port',
-      port.toString(),
-      // Two slots of 3072 tokens: kidsGuard pins prompt and reply checks to one each.
-      '--ctx-size',
-      '6144',
-      '--parallel',
-      '2',
-      '--jinja',
-      '--log-prefix',
-      ...withCpuDeviceParameters(['--gpu-layers', '999'], this.selectedDevice()),
-      '--host',
-      '127.0.0.1',
-    ]
+    const args = buildGuardServerArgs({ modelPath, port, placement })
     const childProcess = spawnBackend(this.getActiveLlamaCppExePath(), args, {
       cwd: this.getActiveLlamaCppDir(),
-      env: this.llamaModelServerEnv(),
+      env: this.guardServerEnv(placement),
     })
     const llamaProcess: LlamaServerProcess = {
       process: childProcess,
@@ -1843,6 +1921,7 @@ export class LlamaCppBackendService implements ApiService {
       modelPath,
       modelRepoId: path.basename(modelPath),
       type: 'guard',
+      placement,
       isReady: false,
     }
     const serverOutput = this.captureServerOutput('[Guard]')

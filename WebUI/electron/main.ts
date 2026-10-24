@@ -1377,7 +1377,16 @@ function wireKidsGuard(pathsManager: PathsManager): void {
       if (!(service instanceof LlamaCppBackendService)) {
         throw new Error('The Llama.cpp backend is required for the safety filter')
       }
-      return service.ensureGuardServer(modelPath)
+      // Temporary stand-in: Task 3 replaces it with the real placement planner.
+      const device = service.devices.find((d) => d.selected)
+      const isCpu = !device || device.id.toLowerCase() === 'cpu'
+      return service.ensureGuardServer(modelPath, {
+        model: '4B',
+        device: isCpu ? { kind: 'cpu' } : { kind: 'gpu', llamaDeviceId: `Vulkan${device.id}` },
+        threads: isCpu ? 4 : 2,
+        batchThreads: isCpu ? 8 : 2,
+        stopForMedia: true,
+      })
     },
     requestModelConsent: (models) => requestDownloadConsent(models),
   })
@@ -1461,7 +1470,9 @@ async function stopChatServicesForMedia(): Promise<void> {
   if (!serviceRegistry) return
   for (const serviceName of ['llamacpp-backend', 'openvino-backend'] as const) {
     const service = serviceRegistry.getService(serviceName)
-    if (!service || service.currentStatus !== 'running') continue
+    const guardRunning =
+      service instanceof LlamaCppBackendService && service.guardPlacement() !== null
+    if (!service || (service.currentStatus !== 'running' && !guardRunning)) continue
     try {
       if (
         serviceName === 'openvino-backend' &&
@@ -1469,6 +1480,9 @@ async function stopChatServicesForMedia(): Promise<void> {
         typeof service.stopChatServers === 'function'
       ) {
         await service.stopChatServers()
+      } else if (service instanceof LlamaCppBackendService) {
+        const keepGuard = service.guardPlacement()?.stopForMedia === false
+        await service.stopChatServersForMedia({ keepGuard })
       } else {
         await service.stop()
       }

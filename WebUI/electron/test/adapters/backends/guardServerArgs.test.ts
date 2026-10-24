@@ -6,11 +6,12 @@ vi.mock('electron', () => ({
   net: {},
 }))
 
-const { buildGuardServerArgs } = await import('../../../adapters/backends/llamaCppBackendService')
+const { buildGuardServerArgs, guardSelectorEnv } =
+  await import('../../../adapters/backends/llamaCppBackendService')
 
 const gpu: GuardPlacement = {
   model: '4B',
-  device: { kind: 'gpu', llamaDeviceId: 'Vulkan1' },
+  device: { kind: 'gpu', llamaDeviceId: '1' },
   threads: 2,
   batchThreads: 2,
   stopForMedia: false,
@@ -38,8 +39,6 @@ describe('buildGuardServerArgs', () => {
       '2',
       '--jinja',
       '--log-prefix',
-      '--device',
-      'Vulkan1',
       '--gpu-layers',
       '999',
       '-t',
@@ -82,5 +81,12 @@ describe('buildGuardServerArgs', () => {
         '127.0.0.1',
       ])
     }
+  })
+
+  it('selects a non-zero gpu by env and never by --device', () => {
+    const args = buildGuardServerArgs({ ...base, placement: gpu })
+    expect(args).not.toContain('--device')
+    expect(guardSelectorEnv(gpu)).toEqual({ GGML_VK_VISIBLE_DEVICES: '1' })
+    expect(guardSelectorEnv(cpu)).toEqual({})
   })
 })

@@ -262,7 +262,7 @@ export function buildLlmServerArgs(options: {
   ]
 }
 
-/** Guard server args for a placement; never carries the user's startup parameters, `--host` stays last. */
+/** Guard server args for a placement (a gpu is chosen by env, see `guardSelectorEnv`); never carries the user's startup parameters, `--host` stays last. */
 export function buildGuardServerArgs(options: {
   modelPath: string
   port: number
@@ -271,7 +271,7 @@ export function buildGuardServerArgs(options: {
   const { placement } = options
   const deviceArgs =
     placement.device.kind === 'gpu'
-      ? ['--device', placement.device.llamaDeviceId, '--gpu-layers', '999', '-t', '2']
+      ? ['--gpu-layers', '999', '-t', '2']
       : [
           '--device',
           'none',
@@ -298,6 +298,13 @@ export function buildGuardServerArgs(options: {
     '--host',
     '127.0.0.1',
   ]
+}
+
+/** The Vulkan selector for a gpu placement, by the service's own device id; nothing for the cpu. */
+export function guardSelectorEnv(placement: GuardPlacement): Record<string, string> {
+  return placement.device.kind === 'gpu'
+    ? vulkanDeviceSelectorEnv(placement.device.llamaDeviceId)
+    : {}
 }
 
 function sameGuardPlacement(a: GuardPlacement, b: GuardPlacement): boolean {
@@ -566,24 +573,32 @@ export class LlamaCppBackendService implements ApiService {
    */
   async ensureGuardServer(modelPath: string, placement: GuardPlacement): Promise<string> {
     if (!this.isSetUp) throw new Error('The Llama.cpp backend is not installed')
-    const running = this.llamaGuardProcess
-    if (
-      running?.isReady &&
-      running.modelPath === modelPath &&
-      running.placement &&
-      sameGuardPlacement(running.placement, placement) &&
-      running.process.exitCode === null
-    ) {
-      return `http://127.0.0.1:${running.port}`
+    const matches = (proc: LlamaServerProcess | null): proc is LlamaServerProcess =>
+      !!proc?.isReady &&
+      proc.modelPath === modelPath &&
+      !!proc.placement &&
+      sameGuardPlacement(proc.placement, placement) &&
+      proc.process.exitCode === null
+    for (;;) {
+      if (matches(this.llamaGuardProcess)) {
+        return `http://127.0.0.1:${this.llamaGuardProcess.port}`
+      }
+      if (this.guardServerStarting) {
+        // A concurrent start may have a different model or placement; re-check after it.
+        const joined = await this.guardServerStarting.catch(() => null)
+        if (matches(joined)) return `http://127.0.0.1:${joined.port}`
+        if (!joined) throw new Error('The guard server failed to start')
+        continue
+      }
+      this.guardServerStarting = (async () => {
+        await this.stopLlamaGuardServer()
+        return this.startLlamaGuardServer(modelPath, placement)
+      })().finally(() => {
+        this.guardServerStarting = null
+      })
+      const started = await this.guardServerStarting
+      return `http://127.0.0.1:${started.port}`
     }
-    this.guardServerStarting ??= (async () => {
-      await this.stopLlamaGuardServer()
-      return this.startLlamaGuardServer(modelPath, placement)
-    })().finally(() => {
-      this.guardServerStarting = null
-    })
-    const started = await this.guardServerStarting
-    return `http://127.0.0.1:${started.port}`
   }
 
   /** The running guard's placement, or null when no guard is up. */
@@ -598,6 +613,10 @@ export class LlamaCppBackendService implements ApiService {
       `Stopping chat servers for media (keepGuard=${options.keepGuard}). It was in state ${this.currentStatus}`,
       this.name,
     )
+    if (this.currentStatus !== 'running') {
+      if (!options.keepGuard) await this.stopLlamaGuardServer()
+      return
+    }
     this.desiredStatus = 'stopped'
     this.setStatus('stopping')
     await this.stopLlamaLlmServer()
@@ -1517,13 +1536,11 @@ export class LlamaCppBackendService implements ApiService {
     return this.selectedDevice()?.id
   }
 
-  /** Guard env: the Vulkan selector only for a gpu placement (`Vulkan0` selects index 0). */
+  /** Guard env: the Vulkan selector only for a gpu placement. */
   private guardServerEnv(placement: GuardPlacement): NodeJS.ProcessEnv {
     return {
       ...process.env,
-      ...(placement.device.kind === 'gpu'
-        ? vulkanDeviceSelectorEnv(placement.device.llamaDeviceId.replace(/^[A-Za-z]+(?=\d+$)/, ''))
-        : {}),
+      ...guardSelectorEnv(placement),
       ...llamaCppPhison.getModelServerEnvAdditions(this.llamaCppBuildVariant),
     }
   }

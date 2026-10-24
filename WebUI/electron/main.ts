@@ -1382,7 +1382,7 @@ function wireKidsGuard(pathsManager: PathsManager): void {
       const isCpu = !device || device.id.toLowerCase() === 'cpu'
       return service.ensureGuardServer(modelPath, {
         model: '4B',
-        device: isCpu ? { kind: 'cpu' } : { kind: 'gpu', llamaDeviceId: `Vulkan${device.id}` },
+        device: isCpu ? { kind: 'cpu' } : { kind: 'gpu', llamaDeviceId: device.id },
         threads: isCpu ? 4 : 2,
         batchThreads: isCpu ? 8 : 2,
         stopForMedia: true,

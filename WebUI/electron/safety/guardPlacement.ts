@@ -29,7 +29,8 @@ export type GuardPlan = { chat: GuardPlacement[]; media: GuardPlacement[] }
 
 const GIB = 1024 ** 3
 const MIB = 1024 ** 2
-const FOOTPRINT_BYTES: Record<GuardModelSize, number> = {
+/** Memory one guard server of each model takes (f16 KV, ctx 6144). */
+export const GUARD_FOOTPRINT_BYTES: Record<GuardModelSize, number> = {
   '4B': Math.round(3.6 * GIB),
   '0.6B': Math.round(1.4 * GIB),
 }
@@ -65,7 +66,7 @@ function fitsSharedCap(facts: GuardFacts, footprint: number) {
 }
 
 function fits(facts: GuardFacts, candidate: Candidate) {
-  const footprint = FOOTPRINT_BYTES[candidate.model]
+  const footprint = GUARD_FOOTPRINT_BYTES[candidate.model]
   if (!candidate.onGpu) return fitsHost(facts, footprint)
   if (facts.hardwareClass === 'dgpu') {
     const free = facts.gpu?.freeBytes

@@ -156,6 +156,8 @@ export type KidsGuardDeps = {
   mediaWindowActive(): boolean
   /** Resolves once the GPU window is back on chat. */
   awaitChatWindow(signal?: AbortSignal): Promise<void>
+  /** The placement of the guard server that is up now, or null. */
+  runningGuardPlacement(): GuardPlacement | null
 }
 
 type GuardMessage = { role: 'user' | 'assistant'; content: string }
@@ -164,11 +166,16 @@ let guardDeps: KidsGuardDeps | null = null
 let modelsReady: Promise<void> | null = null
 let checksActive = 0
 const placementFailures = new Map<string, number>()
+// Bumped whenever a check asks for a different placement than the last one asked for (a restart).
+let guardSwitches = 0
+let lastRequestedKey: string | null = null
 
 export function setKidsGuardDeps(deps: KidsGuardDeps | null): void {
   guardDeps = deps
   modelsReady = null
   placementFailures.clear()
+  guardSwitches = 0
+  lastRequestedKey = null
 }
 
 /** Guard checks in flight; a media window waits for them before taking the GPU. */
@@ -364,13 +371,27 @@ function placementKey(placement: GuardPlacement): string {
   return `${placement.model}:${device.kind}:${device.kind === 'gpu' ? device.llamaDeviceId : ''}`
 }
 
+type GuardChoice = { media: boolean; placements: GuardPlacement[] }
+
 /** The media list while an image run holds the GPU; when it is empty, the chat list after the window. */
-async function guardPlacements(deps: KidsGuardDeps, signal?: AbortSignal) {
-  const plan = await deps.planGuard()
-  if (!deps.mediaWindowActive()) return plan.chat
-  if (plan.media.length > 0) return plan.media
-  await deps.awaitChatWindow(signal)
-  return (await deps.planGuard()).chat
+async function chooseGuardPlacements(
+  deps: KidsGuardDeps,
+  signal?: AbortSignal,
+): Promise<GuardChoice> {
+  for (;;) {
+    const plan = await deps.planGuard()
+    const media = deps.mediaWindowActive()
+    if (!media) return { media, placements: plan.chat }
+    if (plan.media.length > 0) return { media, placements: plan.media }
+    await deps.awaitChatWindow(signal)
+  }
+}
+
+/** Placements whose model is on disk; the last of them is the last resort. */
+function placementsOnDisk(deps: KidsGuardDeps, choice: GuardChoice): GuardPlacement[] {
+  return choice.placements.filter((placement) =>
+    fs.existsSync(guardModelPath(deps, placement.model)),
+  )
 }
 
 async function judgeOn(
@@ -395,23 +416,56 @@ async function judgeWithFallback(
     throw error
   })
   await modelsReady
+  let choice = await chooseGuardPlacements(deps, signal)
+  let candidates = placementsOnDisk(deps, choice)
+  let replanned = false
+  const triedHere = new Set<string>()
   let lastError: unknown = new Error('No guard placement can run')
-  for (const placement of await guardPlacements(deps, signal)) {
+  for (let index = 0; index < candidates.length; index++) {
+    const placement = candidates[index]
     const key = placementKey(placement)
-    const modelPath = guardModelPath(deps, placement.model)
-    if (!fs.existsSync(modelPath)) continue
-    if ((placementFailures.get(key) ?? 0) >= PLACEMENT_FAILURE_LIMIT) continue
+    const lastResort = index === candidates.length - 1
+    if (triedHere.has(key)) continue
+    if (!lastResort && (placementFailures.get(key) ?? 0) >= PLACEMENT_FAILURE_LIMIT) continue
+    triedHere.add(key)
+    let started = false
+    if (lastRequestedKey !== key) {
+      guardSwitches++
+      lastRequestedKey = key
+    }
+    const switchesAtStart = guardSwitches
     try {
-      const baseUrl = await deps.ensureGuardServer(modelPath, placement)
+      const baseUrl = await deps.ensureGuardServer(guardModelPath(deps, placement.model), placement)
+      started = true
       // An unparseable answer comes back as a verdict and blocks; only failures to start or answer fall back.
       const verdict = await judgeOn(baseUrl, conversations, signal)
       placementFailures.delete(key)
       return verdict
     } catch (error) {
       if (signal?.aborted) throw error
-      placementFailures.set(key, (placementFailures.get(key) ?? 0) + 1)
-      appLogger.warn(`Kids guard on ${key} failed: ${errorDetail(error)}`, 'kids-guard')
       lastError = error
+      const running = deps.runningGuardPlacement()
+      // A window flip or another check's restart is not this placement's fault: plan again instead.
+      // A guard that is simply gone without either is a crash and counts.
+      const interrupted =
+        deps.mediaWindowActive() !== choice.media ||
+        guardSwitches !== switchesAtStart ||
+        (started && running !== null && placementKey(running) !== key)
+      appLogger.warn(
+        `Kids guard on ${key} failed${interrupted ? ' (interrupted)' : ''}: ${errorDetail(error)}`,
+        'kids-guard',
+      )
+      if (interrupted && !replanned) {
+        replanned = true
+        triedHere.delete(key)
+        choice = await chooseGuardPlacements(deps, signal)
+        candidates = placementsOnDisk(deps, choice)
+        index = -1
+        continue
+      }
+      if (!interrupted && !lastResort) {
+        placementFailures.set(key, (placementFailures.get(key) ?? 0) + 1)
+      }
     }
   }
   throw lastError

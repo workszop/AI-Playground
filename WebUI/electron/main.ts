@@ -62,7 +62,7 @@ import {
   LlamaCppBackendService,
 } from './adapters/backends/llamaCppBackendService'
 import { kidsGuardChecksActive, setKidsGuardDeps } from './safety/kidsGuard'
-import { collectGuardFacts } from './safety/guardFacts'
+import { collectGuardFacts, memoizeUntilRejected } from './safety/guardFacts'
 import { planGuardPlacements } from './safety/guardPlacement'
 import { readCpuTopology } from './safety/cpuTopology'
 import { filterPartnerPresets, updateIntelPresets } from './adapters/updateIntelPresets.ts'
@@ -1386,12 +1386,14 @@ function wireKidsGuard(pathsManager: PathsManager): void {
   }
   // The physical GPUs do not change while the app runs; probe once, before any model server
   // is up (xpu-smi's Level Zero calls can reset a running Vulkan llama.cpp on Windows).
-  const gpuReference = detectGpuHardwareDevices()
-    .then((probe) => probe.detected.map(toReferenceAccelerator))
-    .catch((error) => {
-      appLogger.warn(`Guard GPU probe failed: ${String(error)}`, 'kids-guard')
-      return []
-    })
+  // A failed probe is forgotten so the next plan probes again.
+  const gpuReference = memoizeUntilRejected(async () => {
+    const probe = await detectGpuHardwareDevices()
+    return probe.detected.map(toReferenceAccelerator)
+  })
+  gpuReference().catch((error) =>
+    appLogger.warn(`Guard GPU probe failed: ${String(error)}`, 'kids-guard'),
+  )
   setKidsGuardDeps({
     ggufModelDir: () => pathsManager.modelPaths.ggufLLM,
     requestModelConsent: (models) => requestDownloadConsent(models),
@@ -1400,11 +1402,12 @@ function wireKidsGuard(pathsManager: PathsManager): void {
       const facts = await collectGuardFacts({
         llamaDevices: () => service.listedLlamaCppDevices(),
         selectedDeviceId: () => service.devices.find((device) => device.selected)?.id,
-        gpuReference: () => gpuReference,
+        gpuReference,
         hostMemory: hostMemorySnapshot,
         gpuSamples: () => latestComputeSnapshot()?.gpus ?? [],
         platform: () => process.platform,
         cpuTopology: () => readCpuTopology(),
+        runningGuard: () => service.guardPlacement(),
       })
       return planGuardPlacements(facts)
     },
@@ -1412,6 +1415,10 @@ function wireKidsGuard(pathsManager: PathsManager): void {
       llamaService().ensureGuardServer(modelPath, placement),
     mediaWindowActive: gpuWindowIsMedia,
     awaitChatWindow,
+    runningGuardPlacement: () => {
+      const service = serviceRegistry?.getService('llamacpp-backend')
+      return service instanceof LlamaCppBackendService ? service.guardPlacement() : null
+    },
   })
 }
 

@@ -190,16 +190,29 @@ const answerWith = (fetchMock: ReturnType<typeof vi.fn>, content: string) =>
     async () => new Response(JSON.stringify({ content }), { status: 200 }),
   )
 
-function guardDeps(modelDir: string, plan: GuardPlan): KidsGuardDeps {
+/** Fake deps; the running guard is whatever placement last started, unless overridden. */
+function guardDeps(
+  modelDir: string,
+  plan: GuardPlan,
+  overrides: Partial<KidsGuardDeps> = {},
+): KidsGuardDeps {
+  let running: GuardPlacement | null = null
+  const start = overrides.ensureGuardServer ?? (async () => 'http://127.0.0.1:39300')
   return {
     ggufModelDir: () => modelDir,
     requestModelConsent: vi.fn(async (models: unknown[]) => {
       for (const model of models as { repo_id: string }[]) writeModel(modelDir, model.repo_id)
     }),
     planGuard: vi.fn(async () => plan),
-    ensureGuardServer: vi.fn(async () => 'http://127.0.0.1:39300'),
     mediaWindowActive: () => false,
     awaitChatWindow: vi.fn(async () => {}),
+    runningGuardPlacement: () => running,
+    ...overrides,
+    ensureGuardServer: vi.fn(async (modelPath: string, used: GuardPlacement) => {
+      const url = await start(modelPath, used)
+      running = used
+      return url
+    }),
   }
 }
 
@@ -323,7 +336,7 @@ describe('guard placement fallback', () => {
   })
 
   const wire = (plan: GuardPlan, overrides: Partial<KidsGuardDeps> = {}) => {
-    const deps = { ...guardDeps(modelDir, plan), ...overrides }
+    const deps = guardDeps(modelDir, plan, overrides)
     setKidsGuardDeps(deps)
     return deps
   }
@@ -425,6 +438,122 @@ describe('guard placement fallback', () => {
     expect(verdict.level).toBe('unavailable')
     expect(isBlocked(verdict)).toBe(true)
     expect(deps.ensureGuardServer).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not count a failure caused by the media window taking over', async () => {
+    let media = false
+    const deps = wire(
+      { chat: [GPU_4B, CPU_4B], media: [CPU_4B] },
+      {
+        mediaWindowActive: () => media,
+        ensureGuardServer: async (_path: string, used: GuardPlacement) =>
+          used.device.kind === 'gpu' ? 'http://gpu' : 'http://cpu',
+      },
+    )
+    fetchMock.mockImplementation(async (url: string) => {
+      if (!url.startsWith('http://gpu')) {
+        return new Response(JSON.stringify({ content: 'Safety: Safe' }), { status: 200 })
+      }
+      media = true
+      throw new TypeError('fetch failed')
+    })
+    for (let i = 0; i < 3; i++) {
+      media = false
+      expect(await checkKidsPrompt(`kot ${i}`)).toEqual({ level: 'safe' })
+    }
+    expect(startedPlacements(deps)).toEqual([GPU_4B, CPU_4B, GPU_4B, CPU_4B, GPU_4B, CPU_4B])
+    expect(deps.planGuard).toHaveBeenCalledTimes(6)
+  })
+
+  it('does not count a failure when another check replaced the guard', async () => {
+    let gpuAnswers = 0
+    const deps = wire(
+      { chat: [GPU_4B, CPU_4B], media: [] },
+      {
+        ensureGuardServer: async (_path: string, used: GuardPlacement) =>
+          used.device.kind === 'gpu' ? 'http://gpu' : 'http://cpu',
+        runningGuardPlacement: () => CPU_SMALL,
+      },
+    )
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith('http://gpu') && gpuAnswers++ % 2 === 0) throw new TypeError('reset')
+      return new Response(JSON.stringify({ content: 'Safety: Safe' }), { status: 200 })
+    })
+    for (let i = 0; i < 3; i++) expect(await checkKidsPrompt(`kot ${i}`)).toEqual({ level: 'safe' })
+    expect(startedPlacements(deps)).toEqual([GPU_4B, GPU_4B, GPU_4B, GPU_4B, GPU_4B, GPU_4B])
+  })
+
+  it('counts a guard that crashed while answering', async () => {
+    const deps = wire(
+      { chat: [GPU_4B, CPU_4B], media: [] },
+      {
+        ensureGuardServer: async (_path: string, used: GuardPlacement) =>
+          used.device.kind === 'gpu' ? 'http://gpu' : 'http://cpu',
+        runningGuardPlacement: () => null,
+      },
+    )
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith('http://gpu')) throw new TypeError('socket hang up')
+      return new Response(JSON.stringify({ content: 'Safety: Safe' }), { status: 200 })
+    })
+    for (let i = 0; i < 3; i++) expect(await checkKidsPrompt(`kot ${i}`)).toEqual({ level: 'safe' })
+    expect(startedPlacements(deps)).toEqual([GPU_4B, CPU_4B, GPU_4B, CPU_4B, CPU_4B])
+  })
+
+  it('plans again when a concurrent check restarted the guard on another placement', async () => {
+    let failGpu: (error: Error) => void = () => {}
+    const deps = wire(
+      { chat: [], media: [] },
+      {
+        planGuard: vi
+          .fn()
+          .mockResolvedValueOnce({ chat: [GPU_4B, CPU_4B], media: [] })
+          .mockResolvedValueOnce({ chat: [CPU_SMALL], media: [] })
+          .mockResolvedValue({ chat: [GPU_4B, CPU_4B], media: [] }),
+        ensureGuardServer: async (_path: string, used: GuardPlacement) =>
+          used.device.kind === 'gpu' ? 'http://gpu' : 'http://cpu',
+        runningGuardPlacement: () => null,
+      },
+    )
+    let gpuCalls = 0
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith('http://gpu') && gpuCalls++ === 0) {
+        return new Promise<Response>((_resolve, reject) => (failGpu = reject))
+      }
+      return new Response(JSON.stringify({ content: 'Safety: Safe' }), { status: 200 })
+    })
+    const first = checkKidsPrompt('kot')
+    await vi.waitFor(() => expect(gpuCalls).toBe(1))
+    expect(await checkKidsPrompt('pies')).toEqual({ level: 'safe' })
+    failGpu(new TypeError('socket hang up'))
+    expect(await first).toEqual({ level: 'safe' })
+    expect(startedPlacements(deps)).toEqual([GPU_4B, CPU_SMALL, GPU_4B])
+  })
+
+  it('never skips the last placement of the list', async () => {
+    const deps = wire(
+      { chat: [CPU_4B], media: [] },
+      { ensureGuardServer: vi.fn().mockRejectedValue(new Error('no memory')) },
+    )
+    for (let i = 0; i < 3; i++)
+      expect((await checkKidsPrompt(`kot ${i}`)).level).toBe('unavailable')
+    expect(startedPlacements(deps)).toEqual([CPU_4B, CPU_4B, CPU_4B])
+  })
+
+  it('still tries a placement that failed elsewhere when it is the last one left', async () => {
+    let media = false
+    const deps = wire(
+      { chat: [CPU_4B, CPU_SMALL], media: [CPU_4B] },
+      {
+        mediaWindowActive: () => media,
+        ensureGuardServer: vi.fn().mockRejectedValue(new Error('no memory')),
+      },
+    )
+    await checkKidsPrompt('a')
+    await checkKidsPrompt('b')
+    media = true
+    await checkKidsPrompt('c')
+    expect(startedPlacements(deps)).toEqual([CPU_4B, CPU_SMALL, CPU_4B, CPU_SMALL, CPU_4B])
   })
 
   it('blocks as unavailable when the plan is empty', async () => {

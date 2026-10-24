@@ -61,7 +61,13 @@ import {
   LLAMACPP_DEFAULT_PARAMETERS,
   LlamaCppBackendService,
 } from './adapters/backends/llamaCppBackendService'
-import { kidsGuardChecksActive, setKidsGuardDeps } from './safety/kidsGuard'
+import {
+  blockedMessageFor,
+  checkKidsPrompt,
+  isBlocked,
+  kidsGuardChecksActive,
+  setKidsGuardDeps,
+} from './safety/kidsGuard'
 import { collectGuardFacts, memoizeUntilRejected } from './safety/guardFacts'
 import { planGuardPlacements } from './safety/guardPlacement'
 import { readCpuTopology } from './safety/cpuTopology'
@@ -144,7 +150,9 @@ import {
   type RunnerComfyService,
 } from './artifact/runner'
 import {
+  artifactPromptChecked,
   awaitChatWindow,
+  forgetArtifactPromptCheck,
   gpuWindowIsMedia,
   cancelArtifactRun,
   cancelAllArtifactRuns,
@@ -1471,6 +1479,8 @@ function wireArtifactRunner(settings: LocalSettings): void {
     readMediaAsDataUri: readAipgMediaAsDataUri,
     getPlatform: () => process.platform,
     devPresetsEnabled: () => !app.isPackaged || settings.showDebugSettingsInUI,
+    promptChecked: artifactPromptChecked,
+    forgetPromptCheck: forgetArtifactPromptCheck,
   })
 
   // The orchestrator owns GPU policy (step 7): every run — panel, chat tool,
@@ -1489,6 +1499,12 @@ function wireArtifactRunner(settings: LocalSettings): void {
     restartChatBackend: reloadLastChatBackend,
     chatRequestsOpen: () =>
       chatInferenceStreamsActive() + piAgentCallsActive() + kidsGuardChecksActive(),
+    checkPrompt: async (prompt, signal) => {
+      const verdict = await checkKidsPrompt(prompt, signal)
+      return isBlocked(verdict)
+        ? { blocked: true, message: blockedMessageFor(verdict) }
+        : { blocked: false }
+    },
   })
 }
 

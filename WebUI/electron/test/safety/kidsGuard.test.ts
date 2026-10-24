@@ -598,6 +598,18 @@ describe('guard placement fallback', () => {
     expect(startedPlacements(deps)).toEqual([GPU_4B])
   })
 
+  it('plans again when the window flips before the guard starts', async () => {
+    let windowReads = 0
+    const deps = wire(
+      { chat: [GPU_4B, CPU_4B], media: [CPU_4B] },
+      // The plan sees chat; by the time a placement would start, an image run holds the GPU.
+      { mediaWindowActive: () => windowReads++ > 0 },
+    )
+    expect(await checkKidsPrompt('kot')).toEqual({ level: 'safe' })
+    expect(startedPlacements(deps)).toEqual([CPU_4B])
+    expect(deps.planGuard).toHaveBeenCalledTimes(2)
+  })
+
   it('blocks on an unparseable answer without trying another placement', async () => {
     const deps = wire({ chat: [GPU_4B, CPU_4B], media: [] })
     answerWith(fetchMock, 'Dawno temu')

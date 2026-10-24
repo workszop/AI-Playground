@@ -427,6 +427,13 @@ async function judgeWithFallback(
     const lastResort = index === candidates.length - 1
     if (triedHere.has(key)) continue
     if (!lastResort && (placementFailures.get(key) ?? 0) >= PLACEMENT_FAILURE_LIMIT) continue
+    // The window flipped since this list was chosen: never start a guard from the other window's list.
+    if (deps.mediaWindowActive() !== choice.media) {
+      choice = await chooseGuardPlacements(deps, signal)
+      candidates = placementsOnDisk(deps, choice)
+      index = -1
+      continue
+    }
     triedHere.add(key)
     let started = false
     if (lastRequestedKey !== key) {

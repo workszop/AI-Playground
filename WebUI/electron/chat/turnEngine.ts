@@ -815,12 +815,6 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
     await persistChatTurn(request, request.messages)
 
     const userText = lastUserText(request.messages)
-    const promptVerdict = await checkKidsPrompt(userText, turn.controller.signal)
-    if (isBlocked(promptVerdict)) {
-      await answerWithoutModel(request, turn, blockedMessageFor(promptVerdict))
-      return
-    }
-
     const config = request.model
     await submitTextRequest(
       {
@@ -923,6 +917,13 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
         skipGpuAdmission: true,
         conversationKey,
       })
+    }
+
+    // Checked once the turn holds the chat window and its backend is up, so the guard never loads mid-image-run.
+    const promptVerdict = await checkKidsPrompt(userText, turn.controller.signal)
+    if (isBlocked(promptVerdict)) {
+      await answerWithoutModel(request, turn, blockedMessageFor(promptVerdict))
+      return
     }
 
     if (request.rag) {

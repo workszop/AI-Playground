@@ -1440,7 +1440,9 @@ describe('turn engine', () => {
     const guard = await import('../../safety/kidsGuard')
     vi.mocked(guard.checkKidsPrompt).mockResolvedValueOnce({ level: 'unsafe' })
     queueFetchMock(sse(textChunks('must not be requested')))
-    const { turnId } = submitChatTurn(turnRequest())
+    const { turnId } = submitChatTurn(
+      turnRequest({ persist: { meta: null, ragHashes: [], lastMainKey: 'conv-1' } }),
+    )
     await waitForTurnDone(turnId)
 
     expect(requests).toHaveLength(0)
@@ -1448,6 +1450,62 @@ describe('turn engine', () => {
       .flatMap((c) => (c.type === 'text-delta' ? [c.delta] : []))
       .join('')
     expect(shown).toBe(guard.KIDS_BLOCKED_MESSAGE)
+    expect(chatChunks().some((c) => c.type === 'error')).toBe(false)
+    expect(chatTurnActive('conv-1')).toBe(false)
+    // The turn was admitted before the check and still releases its occupancy.
+    expect(textQueueEvents().map((e) => e.action)).toEqual(['enqueued', 'started', 'finished'])
+    const saved = saveChatTurnConversation.mock.calls.at(-1)?.[0] as unknown as {
+      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>
+    }
+    expect(saved.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      parts: [{ type: 'text', text: guard.KIDS_BLOCKED_MESSAGE }],
+    })
+  })
+
+  it('kids guard: checks the prompt once the backend is ready, before retrieval and streaming', async () => {
+    const guard = await import('../../safety/kidsGuard')
+    const order: string[] = []
+    const ensureBackendReadiness = vi.fn(async () => {
+      order.push('ready')
+    })
+    setChatReadinessDeps({
+      getService: () => ({ ensureBackendReadiness, baseUrl: 'http://127.0.0.1:39101' }),
+      awaitChatWindow: vi.fn(async () => {}),
+      stopOvmsImageServer: vi.fn(async () => {}),
+      notifyHomeAgentUpstreamReady: vi.fn(),
+    })
+    vi.mocked(guard.checkKidsPrompt).mockImplementationOnce(async () => {
+      order.push(textQueueEvents().some((e) => e.action === 'started') ? 'check' : 'early-check')
+      return { level: 'safe' }
+    })
+    const prepareRag = vi.fn(async (_rag, base: string) => {
+      order.push('rag')
+      return { systemPrompt: base, sourceText: 'doc.txt' }
+    })
+    setChatEngineDeps({ readMediaAsDataUri, prepareRag })
+    queueFetchMock(sse(textChunks('ok')))
+    const base = turnRequest()
+    const { turnId } = submitChatTurn({
+      ...base,
+      rag: {
+        query: 'hi',
+        documentHashes: ['abc'],
+        useGroupRetrieval: false,
+        embeddingServiceName: 'llamacpp-backend',
+        embeddingModel: 'bge',
+        maxResults: 8,
+        perDocResults: 5,
+      },
+      model: {
+        ...base.model,
+        readiness: { serviceName: 'llamacpp-backend', llmModelName: 'test/model.gguf' },
+      },
+    })
+    await waitForTurnDone(turnId)
+
+    expect(order).toEqual(['ready', 'check', 'rag'])
+    expect(requests).toHaveLength(1)
   })
 
   it('writes the thread file on turn start and again with the assembled assistant', async () => {

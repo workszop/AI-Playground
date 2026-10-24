@@ -54,10 +54,14 @@ import {
   type RunnerComfyService,
 } from '../../artifact/runner'
 import {
+  artifactPromptChecked,
   cancelArtifactRun,
+  forgetArtifactPromptCheck,
   resetOrchestratorForTest,
+  setOrchestratorDeps,
   submitArtifactRun,
 } from '../../kernel/orchestrator'
+import { blockedMessageFor, checkKidsPrompt } from '../../safety/kidsGuard'
 import {
   resetKernelBusForTest,
   setKernelEventWindow,
@@ -131,6 +135,8 @@ function deps(overrides: Partial<Parameters<typeof setArtifactRunnerDeps>[0]> = 
     readMediaAsDataUri: vi.fn(async () => null),
     getPlatform: () => 'darwin' as NodeJS.Platform,
     devPresetsEnabled: () => false,
+    promptChecked: (_runId: string) => true,
+    forgetPromptCheck: vi.fn((_runId: string) => {}),
     ...overrides,
   }
 }
@@ -430,9 +436,11 @@ describe('artifact runner', () => {
       { queue: 'queue' },
     )
     const ownRun = () => kernelEvents.filter((event) => event.runId === 'run-2')
-    expect(ownRun()).toEqual([
-      expect.objectContaining({ type: 'artifact-phase', phase: 'queued', owner }),
-    ])
+    await vi.waitFor(() =>
+      expect(ownRun()).toEqual([
+        expect.objectContaining({ type: 'artifact-phase', phase: 'queued', owner }),
+      ]),
+    )
 
     socketHandlers!.onJson({
       type: 'executed',
@@ -593,6 +601,48 @@ describe('artifact runner', () => {
     expect(active).toBeDefined()
     cancelActiveArtifactRun()
     await active
+  })
+
+  it('refuses a run whose prompt the orchestrator did not check', async () => {
+    const runnerDeps = deps({ promptChecked: () => false })
+    setArtifactRunnerDeps(runnerDeps)
+    const result = await submitArtifactRun(payload({ modelsConsented: undefined }))
+    expect(result.state).toBe('failed')
+    expect(result.error).toBe(blockedMessageFor({ level: 'unavailable' }))
+    expect(consentRequests).toBe(0)
+    expect(submittedPrompts).toHaveLength(0)
+    expect(runnerDeps.forgetPromptCheck).toHaveBeenCalledWith('run-1')
+  })
+
+  it('runs a prompt the orchestrator checked and forgets it once settled', async () => {
+    setOrchestratorDeps({
+      stopChatForMedia: async () => {},
+      freeComfyMemory: async () => {},
+      restartChatBackend: async () => {},
+      chatRequestsOpen: () => 0,
+      checkPrompt: async () => ({ blocked: false }),
+    })
+    const runnerDeps = deps({
+      promptChecked: artifactPromptChecked,
+      forgetPromptCheck: vi.fn(forgetArtifactPromptCheck),
+    })
+    setArtifactRunnerDeps(runnerDeps)
+    const request = payload({ params: { ...payload().params, batchSize: 1 } })
+    const run = submitArtifactRun({ ...request, items: itemsFor(request) })
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(1))
+    expect(artifactPromptChecked('run-1')).toBe(true)
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '2',
+        output: { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] },
+      },
+    })
+    expect((await run).state).toBe('completed')
+    expect(runnerDeps.forgetPromptCheck).toHaveBeenCalledWith('run-1')
+    expect(artifactPromptChecked('run-1')).toBe(false)
+    // The check moved to the orchestrator; the runner no longer judges the prompt itself.
+    expect(checkKidsPrompt).not.toHaveBeenCalled()
   })
 
   it('fails a stalled run through the idle watchdog', async () => {

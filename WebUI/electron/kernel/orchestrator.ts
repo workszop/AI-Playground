@@ -70,6 +70,8 @@ export type OrchestratorDeps = {
   restartChatBackend(): Promise<void>
   /** In-flight /v1/chat/completions requests (chat turns, media specialists, summarize). */
   chatRequestsOpen(): number
+  /** Kids-safe check of an image prompt; runs before the run is queued or takes the GPU. */
+  checkPrompt(prompt: string, signal?: AbortSignal): Promise<{ blocked: boolean; message?: string }>
 }
 
 let orchestratorDeps: OrchestratorDeps | null = null
@@ -87,6 +89,10 @@ const runQueue: QueuedRun[] = []
 // enter executeRun and the second cancels the first inside the runner.
 let admittedArtifactRuns = 0
 const admittedCancels = new Map<string, AbortController>()
+
+// Runs whose prompt is being checked (cancellable), and runs whose prompt passed; the runner refuses any other.
+const checkCancels = new Map<string, AbortController>()
+const checkedRunIds = new Set<string>()
 
 // The media-request lane: one whole `media` bracket (nested specialist + its
 // generations) at a time — four parallel `media` tool calls must not prompt
@@ -123,6 +129,9 @@ export function resetOrchestratorForTest(): void {
   for (const cancel of admittedCancels.values()) cancel.abort()
   admittedCancels.clear()
   admittedArtifactRuns = 0
+  for (const cancel of checkCancels.values()) cancel.abort()
+  checkCancels.clear()
+  checkedRunIds.clear()
   for (const entry of mediaRequestQueue) {
     entry.reject(new Error('Orchestrator reset for test'))
   }
@@ -131,6 +140,15 @@ export function resetOrchestratorForTest(): void {
   gpuWindow = 'chat'
   swapBackInFlight = null
   textOccupancy.clear()
+}
+
+/** Whether the run's prompt passed the kids-safe check (the runner refuses unchecked runs). */
+export function artifactPromptChecked(runId: string): boolean {
+  return checkedRunIds.has(runId)
+}
+
+export function forgetArtifactPromptCheck(runId: string): void {
+  checkedRunIds.delete(runId)
 }
 
 export function artifactRunsQueued(): number {
@@ -182,24 +200,72 @@ function unrelatedLocalTextOpen(conversationKey?: string): boolean {
 // ── Artifact run queue ────────────────────────────────────────────────────────
 
 /**
- * Submits a resolved run. `queue: 'fail-fast'` (panel / Home Agent) refuses
- * while anything is executing or queued, and while a local chat turn occupies
- * the GPU (so a panel click cannot kill an open stream). `'queue'` (chat tool
- * lanes, in-process agent tools) parks FIFO and may run nested inside its
- * parent text occupancy.
+ * Submits a resolved run. The prompt is checked first, before the run is
+ * queued or takes the GPU, so the guard never has to start inside the media
+ * window. `queue: 'fail-fast'` (panel / Home Agent) refuses while anything is
+ * executing or queued, and while a local chat turn occupies the GPU (so a
+ * panel click cannot kill an open stream). `'queue'` (chat tool lanes,
+ * in-process agent tools) parks FIFO and may run nested inside its parent
+ * text occupancy.
  */
-export function submitArtifactRun(
+export async function submitArtifactRun(
   payload: ArtifactRunPayload,
   options: { queue: 'fail-fast' | 'queue' } = { queue: 'fail-fast' },
 ): Promise<ArtifactRunResult> {
+  // Refuse a busy fail-fast submit at once instead of after a guard check.
+  const refused = failFastRefusal(options.queue)
+  if (refused) return refused
+  const blocked = await checkRunPrompt(payload)
+  if (blocked) return blocked
+  return admitRun(payload, options.queue)
+}
+
+function failFastRefusal(queue: 'fail-fast' | 'queue'): ArtifactRunResult | null {
+  if (queue !== 'fail-fast') return null
   if (queueBusy()) {
-    if (options.queue === 'fail-fast') {
-      return Promise.resolve({
-        state: 'failed',
-        items: [],
-        error: 'Another generation is already in progress',
-      })
-    }
+    return { state: 'failed', items: [], error: 'Another generation is already in progress' }
+  }
+  if (localTextGpuOpen()) {
+    return { state: 'failed', items: [], error: 'A chat turn is already in progress' }
+  }
+  return null
+}
+
+/** Resolves to the run's result when it must not go on (blocked or cancelled), else null. */
+async function checkRunPrompt(payload: ArtifactRunPayload): Promise<ArtifactRunResult | null> {
+  const cancel = new AbortController()
+  checkCancels.set(payload.runId, cancel)
+  let verdict: { blocked: boolean; message?: string } | null
+  try {
+    // Unwired, nothing is marked checked and the runner refuses the run.
+    verdict = await (orchestratorDeps?.checkPrompt(payload.params.prompt, cancel.signal) ?? null)
+  } catch (error) {
+    verdict = { blocked: true, message: error instanceof Error ? error.message : String(error) }
+  } finally {
+    checkCancels.delete(payload.runId)
+  }
+  if (cancel.signal.aborted) {
+    const result = cancelledRun()
+    emitArtifactPhase(artifactRunTag(payload), 'cancelled', undefined, result.error)
+    return result
+  }
+  if (verdict?.blocked) {
+    return { state: 'failed', items: [], error: verdict.message ?? 'This prompt was blocked.' }
+  }
+  if (verdict) checkedRunIds.add(payload.runId)
+  return null
+}
+
+function admitRun(
+  payload: ArtifactRunPayload,
+  queue: 'fail-fast' | 'queue',
+): Promise<ArtifactRunResult> {
+  const refused = failFastRefusal(queue)
+  if (refused) {
+    checkedRunIds.delete(payload.runId)
+    return Promise.resolve(refused)
+  }
+  if (queueBusy()) {
     return new Promise<ArtifactRunResult>((resolve) => {
       runQueue.push({ payload, resolve })
       emitArtifactPhase(artifactRunTag(payload), 'queued')
@@ -212,13 +278,6 @@ export function submitArtifactRun(
         conversationKey: payload.conversationKey,
         activityId: payload.activityId,
       })
-    })
-  }
-  if (options.queue === 'fail-fast' && localTextGpuOpen()) {
-    return Promise.resolve({
-      state: 'failed',
-      items: [],
-      error: 'A chat turn is already in progress',
     })
   }
   return executeRun(payload)
@@ -240,6 +299,7 @@ function executeRun(payload: ArtifactRunPayload): Promise<ArtifactRunResult> {
   return withGpuWindow(payload, () => startArtifactRun(payload), cancel.signal).finally(
     async () => {
       admittedCancels.delete(payload.runId)
+      checkedRunIds.delete(payload.runId)
       emitArtifactFinished(payload)
       admittedArtifactRuns -= 1
       await drainQueue()
@@ -274,6 +334,7 @@ function emitArtifactFinished(payload: ArtifactRunPayload): void {
 
 /** Cancels one run by id, whether it is active, admitted, or still waiting. */
 export function cancelArtifactRun(runId: string): void {
+  checkCancels.get(runId)?.abort()
   admittedCancels.get(runId)?.abort()
   if (activeArtifactRunId() === runId) {
     cancelActiveArtifactRun()
@@ -287,6 +348,7 @@ export function cancelArtifactRun(runId: string): void {
 }
 
 function dropQueuedRun(entry: (typeof runQueue)[number], reason?: string): void {
+  checkedRunIds.delete(entry.payload.runId)
   const result = cancelledRun(reason)
   emitArtifactPhase(artifactRunTag(entry.payload), 'cancelled', undefined, result.error)
   emitArtifactFinished(entry.payload)
@@ -299,6 +361,7 @@ function dropQueuedRun(entry: (typeof runQueue)[number], reason?: string): void 
  * an invisible drain.
  */
 export function cancelAllArtifactRuns(reason = 'Generation cancelled.'): void {
+  for (const cancel of checkCancels.values()) cancel.abort()
   for (const entry of runQueue.splice(0)) dropQueuedRun(entry, reason)
   for (const cancel of admittedCancels.values()) cancel.abort()
   cancelActiveArtifactRun()
@@ -489,18 +552,21 @@ export function gpuWindowIsMedia(): boolean {
 }
 
 async function acquireMediaWindow(conversationKey?: string, signal?: AbortSignal): Promise<void> {
-  if (!orchestratorDeps) return
+  const deps = orchestratorDeps
+  if (!deps) return
   if (windowIsMedia()) return
   // A release may still be reloading the chat backend; stopping it mid-reload
   // is the race the old wraps shared, and the queue makes it reachable.
   if (swapBackInFlight) await swapBackInFlight.catch(() => {})
   if (windowIsMedia()) return
-  await waitForChatRequestsIdle(signal)
   // Nested media for this conversation may take the GPU while its parent text
   // occupancy is still live (tool phase, HTTP idle). An unrelated chat turn
   // must finish first — no proceed-anyway bound, or that stream dies as a
-  // network error.
-  await waitForUnrelatedTextIdle(conversationKey, signal)
+  // network error. Both waits must hold at the same moment, so loop until they do.
+  do {
+    await waitForChatRequestsIdle(signal)
+    await waitForUnrelatedTextIdle(conversationKey, signal)
+  } while (deps.chatRequestsOpen() > 0)
   if (windowIsMedia()) return
   if (signal?.aborted) throw cancelledGeneration()
   // Flip before stopChatForMedia (seconds — two backends). awaitChatWindow is a
@@ -508,7 +574,7 @@ async function acquireMediaWindow(conversationKey?: string, signal?: AbortSignal
   // a turn pass the gate and then die when the in-flight stop kills its backend.
   gpuWindow = 'media'
   try {
-    await orchestratorDeps.stopChatForMedia()
+    await deps.stopChatForMedia()
   } catch (error) {
     gpuWindow = 'chat'
     throw error

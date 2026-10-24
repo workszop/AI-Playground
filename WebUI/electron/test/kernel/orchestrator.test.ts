@@ -32,6 +32,7 @@ vi.mock('../../artifact/runner', () => ({
 }))
 
 import {
+  artifactPromptChecked,
   artifactRunsQueued,
   artifactWorkOpen,
   awaitChatWindow,
@@ -101,6 +102,7 @@ const deps = (overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps => ({
   freeComfyMemory: vi.fn(async () => {}),
   restartChatBackend: vi.fn(async () => {}),
   chatRequestsOpen: () => 0,
+  checkPrompt: vi.fn(async () => ({ blocked: false })),
   ...overrides,
 })
 
@@ -124,7 +126,9 @@ describe('the orchestrator', () => {
 
     const owner = { kind: 'tool' as const, toolCallId: 'call-2' }
     const queued = submitArtifactRun(payload({ runId: 'run-2', owner }), { queue: 'queue' })
-    expect(phaseEvents).toEqual([{ tag: { runId: 'run-2', owner }, phase: 'queued' }])
+    await vi.waitFor(() =>
+      expect(phaseEvents).toEqual([{ tag: { runId: 'run-2', owner }, phase: 'queued' }]),
+    )
 
     cancelArtifactRun('run-2')
     expect((await queued).state).toBe('cancelled')
@@ -148,7 +152,7 @@ describe('the orchestrator', () => {
 
     const holdTwo = holdNextRun()
     const queued = submitArtifactRun(payload({ runId: 'run-3' }), { queue: 'queue' })
-    expect(artifactRunsQueued()).toBe(1)
+    await vi.waitFor(() => expect(artifactRunsQueued()).toBe(1))
     expect((await submitArtifactRun(payload({ runId: 'run-4' }))).state).toBe('failed')
 
     holdOne.resolve({ state: 'completed', items: [] })
@@ -167,6 +171,7 @@ describe('the orchestrator', () => {
       payload({ runId: 'run-2', conversationKey: 'c1', activityId: 'act-2' }),
       { queue: 'queue' },
     )
+    await vi.waitFor(() => expect(artifactRunsQueued()).toBe(1))
 
     expect(queueEvents.find((e) => e.action === 'enqueued')).toMatchObject({
       runKey: 'run-2',
@@ -198,6 +203,7 @@ describe('the orchestrator', () => {
 
     const holdTwo = holdNextRun()
     const queued = submitArtifactRun(payload({ runId: 'run-2' }), { queue: 'queue' })
+    await vi.waitFor(() => expect(artifactRunsQueued()).toBe(1))
 
     // The head settles with work queued behind: no swap-back.
     holdOne.resolve({ state: 'completed', items: [] })
@@ -267,8 +273,8 @@ describe('the orchestrator', () => {
     const acquiring = submitArtifactRun(payload())
     await vi.waitFor(() => expect(d.stopChatForMedia).toHaveBeenCalled())
     const queued = submitArtifactRun(payload({ runId: 'run-2' }), { queue: 'queue' })
+    await vi.waitFor(() => expect(artifactRunsQueued()).toBe(1))
     expect(artifactWorkOpen()).toBe(true)
-    expect(artifactRunsQueued()).toBe(1)
 
     cancelAllArtifactRuns('The app window was replaced')
     expect((await queued).state).toBe('cancelled')
@@ -305,6 +311,7 @@ describe('the orchestrator', () => {
     const queued = submitArtifactRun(payload({ runId: 'run-2', keepModelsLoaded: true }), {
       queue: 'queue',
     })
+    await vi.waitFor(() => expect(artifactRunsQueued()).toBe(1))
     holdOne.resolve({ state: 'completed', items: [] })
     await active
     expect(d.freeComfyMemory).not.toHaveBeenCalled()
@@ -340,6 +347,112 @@ describe('the orchestrator', () => {
     await vi.waitFor(() => expect(d.stopChatForMedia).toHaveBeenCalledTimes(1))
     hold.resolve({ state: 'completed', items: [] })
     await active
+  })
+
+  it('checks the prompt before the GPU window is taken', async () => {
+    const order: string[] = []
+    const d = deps({
+      checkPrompt: vi.fn(async () => {
+        order.push('check')
+        return { blocked: false }
+      }),
+      stopChatForMedia: vi.fn(async () => {
+        order.push('stop')
+      }),
+    })
+    setOrchestratorDeps(d)
+    const hold = holdNextRun()
+    const active = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(activeRunId).toBe('run-1'))
+    expect(order).toEqual(['check', 'stop'])
+    expect(d.checkPrompt).toHaveBeenCalledWith('a castle', expect.any(AbortSignal))
+    expect(artifactPromptChecked('run-1')).toBe(true)
+    hold.resolve({ state: 'completed', items: [] })
+    await active
+    expect(artifactPromptChecked('run-1')).toBe(false)
+  })
+
+  it('fails a blocked prompt without queueing it or stopping chat', async () => {
+    const d = deps({ checkPrompt: vi.fn(async () => ({ blocked: true, message: 'Nope.' })) })
+    setOrchestratorDeps(d)
+    const result = await submitArtifactRun(payload(), { queue: 'queue' })
+    expect(result).toEqual({ state: 'failed', items: [], error: 'Nope.' })
+    expect(d.stopChatForMedia).not.toHaveBeenCalled()
+    expect(startArtifactRunMock).not.toHaveBeenCalled()
+    expect(queueEvents).toEqual([])
+    expect(artifactPromptChecked('run-1')).toBe(false)
+  })
+
+  it('refuses a busy fail-fast submit without checking its prompt', async () => {
+    const d = deps()
+    setOrchestratorDeps(d)
+    const hold = holdNextRun()
+    const active = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(activeRunId).toBe('run-1'))
+    const refused = await submitArtifactRun(payload({ runId: 'run-2' }))
+    expect(refused.error).toBe('Another generation is already in progress')
+    expect(d.checkPrompt).toHaveBeenCalledTimes(1)
+    hold.resolve({ state: 'completed', items: [] })
+    await active
+  })
+
+  it('cancels a run while its prompt is being checked', async () => {
+    let seen: AbortSignal | undefined
+    const d = deps({
+      checkPrompt: vi.fn(
+        (_prompt: string, signal?: AbortSignal) =>
+          new Promise<{ blocked: boolean }>((resolve) => {
+            seen = signal
+            signal?.addEventListener('abort', () => resolve({ blocked: true }))
+          }),
+      ),
+    })
+    setOrchestratorDeps(d)
+    const run = submitArtifactRun(payload(), { queue: 'queue' })
+    await vi.waitFor(() => expect(d.checkPrompt).toHaveBeenCalled())
+    cancelArtifactRun('run-1')
+    expect(seen?.aborted).toBe(true)
+    expect((await run).state).toBe('cancelled')
+    expect(d.stopChatForMedia).not.toHaveBeenCalled()
+    expect(startArtifactRunMock).not.toHaveBeenCalled()
+  })
+
+  it('waits for an open guard check before stopping chat', async () => {
+    // Another check (a chat prompt) is still judging on the guard.
+    let openChecks = 1
+    const d = deps({ chatRequestsOpen: () => openChecks })
+    setOrchestratorDeps(d)
+    const hold = holdNextRun()
+    const active = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(d.checkPrompt).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(d.stopChatForMedia).not.toHaveBeenCalled()
+    openChecks = 0
+    await vi.waitFor(() => expect(d.stopChatForMedia).toHaveBeenCalledTimes(1))
+    hold.resolve({ state: 'completed', items: [] })
+    await active
+  })
+
+  it('stops chat only once chat requests and unrelated text are idle together', async () => {
+    let openRequests = 0
+    const d = deps({ chatRequestsOpen: () => openRequests })
+    setOrchestratorDeps(d)
+    await submitTextRequest({ runId: 'turn-1', conversationKey: 'c1', needsGpu: true })
+    const hold = holdNextRun()
+    const other = submitArtifactRun(payload({ runId: 'other-1', conversationKey: 'c2' }), {
+      queue: 'queue',
+    })
+    await vi.waitFor(() => expect(d.checkPrompt).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    // The turn opens a request, then its occupancy ends while the request is still open.
+    openRequests = 1
+    finishTextRequest('turn-1')
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(d.stopChatForMedia).not.toHaveBeenCalled()
+    openRequests = 0
+    await vi.waitFor(() => expect(d.stopChatForMedia).toHaveBeenCalledTimes(1))
+    hold.resolve({ state: 'completed', items: [] })
+    expect((await other).state).toBe('completed')
   })
 
   it('chat readiness waits for the GPU window to come back to chat', async () => {
@@ -391,6 +504,7 @@ describe('the orchestrator', () => {
     const queued = submitArtifactRun(payload({ runId: 'run-2', activityId: 'act-2' }), {
       queue: 'queue',
     })
+    await vi.waitFor(() => expect(artifactRunsQueued()).toBe(1))
     cancelArtifactRun('run-2')
     expect((await queued).state).toBe('cancelled')
     expect(cancelActiveMock).not.toHaveBeenCalled()

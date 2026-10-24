@@ -65,7 +65,7 @@ import {
 import { buildDummyGlb, DUMMY_3D_PRESET_NAME, VIEW_FIXTURE } from '@/lib/devPresetWorkflows'
 import { saveMediaItems } from '../persist/mediaItemFiles'
 import { extractMessage } from '@/assets/js/errors/appError'
-import { blockedMessageFor, checkKidsPrompt, isBlocked } from '../safety/kidsGuard'
+import { blockedMessageFor } from '../safety/kidsGuard'
 
 const appLogger = appLoggerInstance
 
@@ -167,6 +167,10 @@ export type ArtifactRunnerDeps = {
   getPlatform(): NodeJS.Platform
   /** Dev-only dummy presets are offered (npm run dev / showDebugSettingsInUI). */
   devPresetsEnabled(): boolean
+  /** Whether the orchestrator's kids-safe check passed this run's prompt. */
+  promptChecked(runId: string): boolean
+  /** Drops the run's checked mark once it has settled. */
+  forgetPromptCheck(runId: string): void
 }
 
 type ActiveRun = {
@@ -317,6 +321,7 @@ function persistRendererGallery(run: ActiveRun): void {
 function finish(run: ActiveRun, result: ArtifactRunResult): void {
   if (run.settled) return
   run.settled = true
+  runnerDeps?.forgetPromptCheck(run.payload.runId)
   if (run.idleTimer) {
     clearTimeout(run.idleTimer)
     run.idleTimer = null
@@ -718,9 +723,9 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
   armIdleTimeout(run)
   setPhase(run, 'preparing-backend')
 
-  const promptVerdict = await checkKidsPrompt(run.payload.params.prompt)
-  if (isBlocked(promptVerdict)) {
-    failRun(run, blockedMessageFor(promptVerdict), false)
+  // The orchestrator checks the prompt before the GPU window; a run that bypassed it fails closed.
+  if (!deps.promptChecked(run.payload.runId)) {
+    failRun(run, blockedMessageFor({ level: 'unavailable' }), false)
     return
   }
 

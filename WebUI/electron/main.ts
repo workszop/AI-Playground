@@ -1126,6 +1126,14 @@ setRagAccess({
 appShutdown.register({ name: 'agent mode', run: () => shutdownAgentMode() })
 appShutdown.register({ name: 'MCP servers', run: () => stopAllMcpServers() })
 appShutdown.register({ name: 'backend services', run: () => serviceRegistry?.stopAllServices() })
+// stopAllServices skips a 'stopped' Llama.cpp service, and a guard kept through a media stop lives on in it.
+appShutdown.register({
+  name: 'kids guard',
+  run: () => {
+    const service = serviceRegistry?.getService('llamacpp-backend')
+    return service instanceof LlamaCppBackendService ? service.stopGuardServer() : undefined
+  },
+})
 appShutdown.register({
   name: 'langchain worker',
   run: () => {

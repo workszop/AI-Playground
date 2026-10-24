@@ -660,7 +660,7 @@ export class LlamaCppBackendService implements ApiService {
         continue
       }
       this.guardServerStarting = (async () => {
-        await this.stopLlamaGuardServer()
+        await this.stopGuardServer()
         return this.startLlamaGuardServer(modelPath, placement)
       })().finally(() => {
         this.guardServerStarting = null
@@ -683,14 +683,14 @@ export class LlamaCppBackendService implements ApiService {
       this.name,
     )
     if (this.currentStatus !== 'running') {
-      if (!options.keepGuard) await this.stopLlamaGuardServer()
+      if (!options.keepGuard) await this.stopGuardServer()
       return
     }
     this.desiredStatus = 'stopped'
     this.setStatus('stopping')
     await this.stopLlamaLlmServer()
     await this.stopLlamaEmbeddingServer()
-    if (!options.keepGuard) await this.stopLlamaGuardServer()
+    if (!options.keepGuard) await this.stopGuardServer()
     this.setStatus('stopped')
   }
 
@@ -1554,7 +1554,7 @@ export class LlamaCppBackendService implements ApiService {
     // Stop all model servers
     await this.stopLlamaLlmServer()
     await this.stopLlamaEmbeddingServer()
-    await this.stopLlamaGuardServer()
+    await this.stopGuardServer()
 
     this.setStatus('stopped')
     return 'stopped'
@@ -1973,6 +1973,8 @@ export class LlamaCppBackendService implements ApiService {
       placement,
       isReady: false,
     }
+    let processExited = false
+    let exitCode: number | null = null
     const serverOutput = this.captureServerOutput('[Guard]')
     childProcess.stdout!.on('data', serverOutput.handle)
     childProcess.stderr!.on('data', serverOutput.handle)
@@ -1981,19 +1983,45 @@ export class LlamaCppBackendService implements ApiService {
     })
     childProcess.on('exit', (code: number | null) => {
       serverOutput.flush()
+      processExited = true
+      exitCode = code
       this.appLogger.info(`Guard server process exited with code: ${code}`, this.name)
       if (this.llamaGuardProcess === llamaProcess) this.llamaGuardProcess = null
     })
-    await this.waitForServerReady(`http://127.0.0.1:${port}/health`, childProcess, () => {
-      serverOutput.flush()
-      return serverOutput.tail()
-    })
-    llamaProcess.isReady = true
+    // Tracked before it is ready so a stop or quit during startup still reaches it.
     this.llamaGuardProcess = llamaProcess
+    // llama-server prints from the start and answers 503 while loading, so output alone is no failure.
+    const getStartupError = (): string | null => {
+      serverOutput.flush()
+      if (!processExited) return null
+      const tail = serverOutput.tail()
+      return (
+        `The guard server exited during startup (code ${exitCode}).` +
+        (tail ? `\n\nLast output from llama-server:\n${tail}` : '')
+      )
+    }
+    try {
+      await this.waitForServerReady(
+        `http://127.0.0.1:${port}/health`,
+        childProcess,
+        getStartupError,
+      )
+    } catch (error) {
+      // Spawned detached: a guard left running after a failed start would outlive the app.
+      await terminateProcessTree(childProcess, {
+        name: this.name,
+        label: 'guard',
+        appLogger: this.appLogger,
+      })
+      if (this.llamaGuardProcess === llamaProcess) this.llamaGuardProcess = null
+      throw error
+    }
+    llamaProcess.isReady = true
     return llamaProcess
   }
 
-  private async stopLlamaGuardServer(): Promise<void> {
+  /** Also an app shutdown step: a guard kept through a media stop outlives `stop()`'s status check. */
+  async stopGuardServer(): Promise<void> {
     if (!this.llamaGuardProcess) return
     await terminateProcessTree(this.llamaGuardProcess.process, {
       name: this.name,

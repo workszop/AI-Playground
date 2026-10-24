@@ -247,6 +247,7 @@ describe('guard calls', () => {
       expect.objectContaining({ repo_id: KIDS_GUARD_MODEL_REPO, type: 'ggufLLM' }),
       expect.objectContaining({ repo_id: KIDS_GUARD_SMALL_MODEL_REPO, type: 'ggufLLM' }),
     ])
+    expect(deps.planGuard).toHaveBeenCalledWith(['4B', '0.6B'])
     expect(deps.ensureGuardServer).toHaveBeenCalledWith(
       path.join(modelDir, KIDS_GUARD_MODEL_DIR, KIDS_GUARD_MODEL_FILE),
       GPU_4B,
@@ -356,6 +357,7 @@ describe('guard placement fallback', () => {
       },
     )
     expect(await checkKidsPrompt('kot')).toEqual({ level: 'safe' })
+    expect(deps.planGuard).toHaveBeenCalledWith(['4B'])
     expect(deps.ensureGuardServer).toHaveBeenCalledTimes(1)
     expect(deps.ensureGuardServer).toHaveBeenCalledWith(
       modelPath(KIDS_GUARD_MODEL_DIR, KIDS_GUARD_MODEL_FILE),

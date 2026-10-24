@@ -1402,7 +1402,7 @@ function wireKidsGuard(pathsManager: PathsManager): void {
   setKidsGuardDeps({
     ggufModelDir: () => pathsManager.modelPaths.ggufLLM,
     requestModelConsent: (models) => requestDownloadConsent(models),
-    planGuard: async () => {
+    planGuard: async (modelsOnDisk) => {
       const service = llamaService()
       const facts = await collectGuardFacts({
         llamaDevices: () => service.listedLlamaCppDevices(),
@@ -1413,6 +1413,7 @@ function wireKidsGuard(pathsManager: PathsManager): void {
         platform: () => process.platform,
         cpuTopology: () => readCpuTopology(),
         runningGuard: () => service.guardPlacement(),
+        modelsOnDisk: () => modelsOnDisk,
       })
       return planGuardPlacements(facts)
     },

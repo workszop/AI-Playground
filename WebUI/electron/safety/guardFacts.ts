@@ -7,7 +7,12 @@ import {
   type ReferenceAccelerator,
 } from '../adapters/hardware/deviceArch.ts'
 import type { CpuTopology } from './cpuTopology'
-import { GUARD_FOOTPRINT_BYTES, type GuardFacts, type GuardPlacement } from './guardPlacement'
+import {
+  GUARD_FOOTPRINT_BYTES,
+  type GuardFacts,
+  type GuardModelSize,
+  type GuardPlacement,
+} from './guardPlacement'
 import { KIDS_GUARD_ALLOW_SMALL_FALLBACK } from './kidsGuard'
 
 export type GuardFactsDeps = {
@@ -24,6 +29,8 @@ export type GuardFactsDeps = {
   cpuTopology(): CpuTopology
   /** The placement of the guard server that is up now, whose memory the live numbers include. */
   runningGuard(): GuardPlacement | null
+  /** Guard models that are downloaded. */
+  modelsOnDisk(): GuardModelSize[]
 }
 
 const MIB = 1024 ** 2
@@ -114,6 +121,7 @@ export async function collectGuardFacts(deps: GuardFactsDeps): Promise<GuardFact
     },
     cpu: deps.cpuTopology(),
     allowSmallFallback: KIDS_GUARD_ALLOW_SMALL_FALLBACK,
+    modelsOnDisk: deps.modelsOnDisk(),
   }
   if (!gpu) return { hardwareClass: 'cpu-only', ...base }
 

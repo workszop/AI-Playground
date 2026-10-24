@@ -22,6 +22,8 @@ export type GuardFacts = {
   sharedGpuUsedBytes?: number
   cpu: CpuTopology
   allowSmallFallback: boolean
+  /** Guard models downloaded; the last resort is picked among these only. */
+  modelsOnDisk: GuardModelSize[]
 }
 export type GuardPlan = { chat: GuardPlacement[]; media: GuardPlacement[] }
 
@@ -99,7 +101,9 @@ function toPlacement(facts: GuardFacts, candidate: Candidate): GuardPlacement {
 export function planGuardPlacements(facts: GuardFacts): GuardPlan {
   const candidates = candidateOrder(facts).filter(
     (candidate) =>
-      (facts.allowSmallFallback || candidate.model !== '0.6B') && (!candidate.onGpu || facts.gpu),
+      (facts.allowSmallFallback || candidate.model !== '0.6B') &&
+      facts.modelsOnDisk.includes(candidate.model) &&
+      (!candidate.onGpu || facts.gpu),
   )
   const lastResort = candidates[candidates.length - 1]
   const chat = candidates

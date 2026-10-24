@@ -57,6 +57,7 @@ function deps(overrides: Partial<GuardFactsDeps> = {}): GuardFactsDeps {
     platform: () => 'linux',
     cpuTopology: () => TOPOLOGY,
     runningGuard: () => null,
+    modelsOnDisk: () => ['4B', '0.6B'],
     ...overrides,
   }
 }
@@ -70,6 +71,7 @@ describe('collectGuardFacts', () => {
       host: { totalBytes: 32000 * MIB, freeBytes: 26000 * MIB },
       cpu: TOPOLOGY,
       allowSmallFallback: true,
+      modelsOnDisk: ['4B', '0.6B'],
     })
   })
 

@@ -17,6 +17,7 @@ const facts = (overrides: Partial<GuardFacts>): GuardFacts => ({
   host: host(32, 20),
   cpu,
   allowSmallFallback: true,
+  modelsOnDisk: ['4B', '0.6B'],
   ...overrides,
 })
 const chain = (input: GuardFacts) =>
@@ -117,6 +118,37 @@ describe('planGuardPlacements', () => {
         }),
       ),
     ).toEqual(['4B gpu', '4B cpu'])
+  })
+
+  it('only the 4B on disk keeps 4B cpu as the last resort', () => {
+    const input = facts({
+      hardwareClass: 'igpu',
+      gpu: vulkan(16, 16),
+      host: host(16, 6),
+      modelsOnDisk: ['4B'],
+    })
+    expect(chain(input)).toEqual(['4B cpu'])
+  })
+
+  it('only the 0.6B on disk plans the 0.6B chain', () => {
+    const input = facts({
+      hardwareClass: 'igpu',
+      gpu: vulkan(32, 32),
+      host: host(32, 20),
+      modelsOnDisk: ['0.6B'],
+    })
+    expect(chain(input)).toEqual(['0.6B gpu', '0.6B cpu'])
+  })
+
+  it('a dgpu image run with only the 4B on disk keeps a 4B media placement', () => {
+    const plan = planGuardPlacements(
+      facts({ hardwareClass: 'dgpu', gpu: vulkan(8, 7), host: host(8, 5), modelsOnDisk: ['4B'] }),
+    )
+    expect(plan.media.map((p) => `${p.model} ${p.device.kind}`)).toEqual(['4B cpu'])
+  })
+
+  it('no model on disk plans nothing', () => {
+    expect(planGuardPlacements(facts({ modelsOnDisk: [] }))).toEqual({ chat: [], media: [] })
   })
 
   it('Windows shared cap exceeded drops 4B on the igpu', () => {

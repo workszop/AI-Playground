@@ -148,8 +148,8 @@ export type KidsGuardDeps = {
   ggufModelDir(): string
   /** The shared download-consent flow; rejects when declined or failed. */
   requestModelConsent(models: unknown[]): Promise<void>
-  /** Where the guard may run right now, best placement first. */
-  planGuard(): Promise<GuardPlan>
+  /** Where the guard may run right now, best placement first, using only the models on disk. */
+  planGuard(modelsOnDisk: GuardModelSize[]): Promise<GuardPlan>
   /** Starts (or reuses) the guard llama-server for `modelPath` on `placement`; resolves to its base URL. */
   ensureGuardServer(modelPath: string, placement: GuardPlacement): Promise<string>
   /** Whether an image run holds the GPU window. */
@@ -225,6 +225,10 @@ function guardModelPath(deps: KidsGuardDeps, model: GuardModelSize): string {
 
 function wantedGuardModels(): GuardModelSize[] {
   return KIDS_GUARD_ALLOW_SMALL_FALLBACK ? ['4B', '0.6B'] : ['4B']
+}
+
+function guardModelsOnDisk(deps: KidsGuardDeps): GuardModelSize[] {
+  return wantedGuardModels().filter((model) => fs.existsSync(guardModelPath(deps, model)))
 }
 
 /** Asks once for every missing guard model, so a fallback never downloads mid-session. */
@@ -379,7 +383,7 @@ async function chooseGuardPlacements(
   signal?: AbortSignal,
 ): Promise<GuardChoice> {
   for (;;) {
-    const plan = await deps.planGuard()
+    const plan = await deps.planGuard(guardModelsOnDisk(deps))
     const media = deps.mediaWindowActive()
     if (!media) return { media, placements: plan.chat }
     if (plan.media.length > 0) return { media, placements: plan.media }

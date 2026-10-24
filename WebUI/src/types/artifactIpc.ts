@@ -50,4 +50,6 @@ export type ArtifactRunResult = {
   state: 'completed' | 'failed' | 'cancelled'
   items: MediaItem[]
   error?: string
+  /** The kids-safe guard refused the prompt; nothing ran and `error` is the message to show. */
+  blocked?: boolean
 }

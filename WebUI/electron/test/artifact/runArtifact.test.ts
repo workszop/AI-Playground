@@ -547,6 +547,28 @@ describe('runArtifact', () => {
     expect(generatedImages.value).toEqual([])
   })
 
+  it('shows a blocked prompt as a failed generation with its message', async () => {
+    presetsFixture.value = [comfyPreset({ name: 'Draft Image' })]
+    runIpcMock.mockResolvedValueOnce({
+      state: 'failed',
+      items: [],
+      error: 'Nie mogę w tym pomóc.',
+      blocked: true,
+    })
+
+    const result = await runArtifact({
+      kind: 'create-image',
+      workflow: 'Draft Image',
+      prompt: 'a castle',
+    })
+
+    expect(result).toMatchObject({ state: 'failed', error: 'Nie mogę w tym pomóc.' })
+    expect(failGenerationMock).toHaveBeenCalledWith('Nie mogę w tym pomóc.')
+    expect(lastError.value).toBe('Nie mogę w tym pomóc.')
+    // The stub stays, failed, so the result view shows the message instead of nothing.
+    expect(generatedImages.value.map((item) => item.state)).toEqual(['failed'])
+  })
+
   it('keeps already-done items in the history when a later failure carries them', async () => {
     presetsFixture.value = [
       comfyPreset({

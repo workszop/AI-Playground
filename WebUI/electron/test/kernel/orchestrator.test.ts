@@ -6,12 +6,14 @@ vi.mock('../../observability/logger.ts', () => ({
 
 const queueEvents: Array<Record<string, unknown>> = []
 const phaseEvents: Array<{ tag: Record<string, unknown>; phase: string }> = []
+const phaseErrors: Array<string | undefined> = []
 vi.mock('../../kernel/kernelBus', () => ({
   emitQueueEvent: (event: Record<string, unknown>) => {
     queueEvents.push(event)
   },
-  emitArtifactPhase: (tag: Record<string, unknown>, phase: string) => {
+  emitArtifactPhase: (tag: Record<string, unknown>, phase: string, _p: unknown, error?: string) => {
     phaseEvents.push({ tag, phase })
+    phaseErrors.push(error)
   },
 }))
 
@@ -38,6 +40,7 @@ import {
   awaitChatWindow,
   cancelArtifactRun,
   cancelAllArtifactRuns,
+  cancelCurrentArtifactRun,
   finishTextRequest,
   mediaRequestsQueued,
   resetOrchestratorForTest,
@@ -49,6 +52,7 @@ import {
   type OrchestratorDeps,
 } from '../../kernel/orchestrator'
 import type { ArtifactRunPayload } from '../../artifact/runner'
+import { blockedMessageFor } from '../../safety/kidsGuard'
 
 type Deferred = {
   resolve: (value: unknown) => void
@@ -114,6 +118,7 @@ describe('the orchestrator', () => {
     vi.resetAllMocks()
     queueEvents.length = 0
     phaseEvents.length = 0
+    phaseErrors.length = 0
     activeRunId = null
     resetOrchestratorForTest()
   })
@@ -376,11 +381,54 @@ describe('the orchestrator', () => {
     const d = deps({ checkPrompt: vi.fn(async () => ({ blocked: true, message: 'Nope.' })) })
     setOrchestratorDeps(d)
     const result = await submitArtifactRun(payload(), { queue: 'queue' })
-    expect(result).toEqual({ state: 'failed', items: [], error: 'Nope.' })
+    expect(result).toEqual({ state: 'failed', items: [], error: 'Nope.', blocked: true })
     expect(d.stopChatForMedia).not.toHaveBeenCalled()
     expect(startArtifactRunMock).not.toHaveBeenCalled()
     expect(queueEvents).toEqual([])
+    // The terminal phase lets the panel and tool cards show the failure with its message.
+    expect(phaseEvents).toEqual([{ tag: { runId: 'run-1', owner: undefined }, phase: 'failed' }])
+    expect(phaseErrors).toEqual(['Nope.'])
     expect(artifactPromptChecked('run-1')).toBe(false)
+  })
+
+  it('blocks with the unavailable message when the check itself throws', async () => {
+    const d = deps({
+      checkPrompt: vi.fn(async () => {
+        throw new Error('socket hang up')
+      }),
+    })
+    setOrchestratorDeps(d)
+    const result = await submitArtifactRun(payload())
+    expect(result.state).toBe('failed')
+    expect(result.error).toBe(blockedMessageFor({ level: 'unavailable' }))
+    expect(startArtifactRunMock).not.toHaveBeenCalled()
+  })
+
+  it('the Stop button cancels a panel run while its prompt is being checked', async () => {
+    const d = deps({
+      checkPrompt: vi.fn(
+        (_prompt: string, signal?: AbortSignal) =>
+          new Promise<{ blocked: boolean }>((resolve) => {
+            signal?.addEventListener('abort', () => resolve({ blocked: false }))
+          }),
+      ),
+    })
+    setOrchestratorDeps(d)
+    const panel = submitArtifactRun(payload({ owner: { kind: 'panel' } }))
+    const tool = submitArtifactRun(
+      payload({ runId: 'tool-1', owner: { kind: 'tool', toolCallId: 'call-1' } }),
+      { queue: 'queue' },
+    )
+    await vi.waitFor(() => expect(d.checkPrompt).toHaveBeenCalledTimes(2))
+    cancelCurrentArtifactRun()
+    expect((await panel).state).toBe('cancelled')
+    expect(startArtifactRunMock).not.toHaveBeenCalled()
+    expect(d.stopChatForMedia).not.toHaveBeenCalled()
+    expect(cancelActiveMock).toHaveBeenCalledTimes(1)
+    // A tool run is cancelled by its own id, not by the panel's Stop.
+    expect(await Promise.race([tool, Promise.resolve('pending')])).toBe('pending')
+    cancelArtifactRun('tool-1')
+    expect((await tool).state).toBe('cancelled')
   })
 
   it('refuses a busy fail-fast submit without checking its prompt', async () => {

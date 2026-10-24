@@ -28,6 +28,7 @@
 // against the media GPU window. VRAM budgets / jump-the-queue are not here.
 
 import { appLoggerInstance } from '../observability/logger'
+import { blockedMessageFor } from '../safety/kidsGuard'
 import { emitArtifactPhase, emitQueueEvent } from './kernelBus'
 import {
   artifactRunActive,
@@ -91,7 +92,7 @@ let admittedArtifactRuns = 0
 const admittedCancels = new Map<string, AbortController>()
 
 // Runs whose prompt is being checked (cancellable), and runs whose prompt passed; the runner refuses any other.
-const checkCancels = new Map<string, AbortController>()
+const checkCancels = new Map<string, { controller: AbortController; panel: boolean }>()
 const checkedRunIds = new Set<string>()
 
 // The media-request lane: one whole `media` bracket (nested specialist + its
@@ -129,7 +130,7 @@ export function resetOrchestratorForTest(): void {
   for (const cancel of admittedCancels.values()) cancel.abort()
   admittedCancels.clear()
   admittedArtifactRuns = 0
-  for (const cancel of checkCancels.values()) cancel.abort()
+  for (const check of checkCancels.values()) check.controller.abort()
   checkCancels.clear()
   checkedRunIds.clear()
   for (const entry of mediaRequestQueue) {
@@ -234,13 +235,14 @@ function failFastRefusal(queue: 'fail-fast' | 'queue'): ArtifactRunResult | null
 /** Resolves to the run's result when it must not go on (blocked or cancelled), else null. */
 async function checkRunPrompt(payload: ArtifactRunPayload): Promise<ArtifactRunResult | null> {
   const cancel = new AbortController()
-  checkCancels.set(payload.runId, cancel)
+  checkCancels.set(payload.runId, { controller: cancel, panel: payload.owner?.kind === 'panel' })
   let verdict: { blocked: boolean; message?: string } | null
   try {
     // Unwired, nothing is marked checked and the runner refuses the run.
     verdict = await (orchestratorDeps?.checkPrompt(payload.params.prompt, cancel.signal) ?? null)
   } catch (error) {
-    verdict = { blocked: true, message: error instanceof Error ? error.message : String(error) }
+    appLogger.warn(`Image prompt check failed, blocking: ${String(error)}`, 'kids-guard')
+    verdict = { blocked: true }
   } finally {
     checkCancels.delete(payload.runId)
   }
@@ -250,7 +252,10 @@ async function checkRunPrompt(payload: ArtifactRunPayload): Promise<ArtifactRunR
     return result
   }
   if (verdict?.blocked) {
-    return { state: 'failed', items: [], error: verdict.message ?? 'This prompt was blocked.' }
+    const error = verdict.message ?? blockedMessageFor({ level: 'unavailable' })
+    // Nothing else will settle the run's placeholders: the panel and tool cards read this phase.
+    emitArtifactPhase(artifactRunTag(payload), 'failed', undefined, error)
+    return { state: 'failed', items: [], error, blocked: true }
   }
   if (verdict) checkedRunIds.add(payload.runId)
   return null
@@ -334,7 +339,7 @@ function emitArtifactFinished(payload: ArtifactRunPayload): void {
 
 /** Cancels one run by id, whether it is active, admitted, or still waiting. */
 export function cancelArtifactRun(runId: string): void {
-  checkCancels.get(runId)?.abort()
+  checkCancels.get(runId)?.controller.abort()
   admittedCancels.get(runId)?.abort()
   if (activeArtifactRunId() === runId) {
     cancelActiveArtifactRun()
@@ -361,9 +366,20 @@ function dropQueuedRun(entry: (typeof runQueue)[number], reason?: string): void 
  * an invisible drain.
  */
 export function cancelAllArtifactRuns(reason = 'Generation cancelled.'): void {
-  for (const cancel of checkCancels.values()) cancel.abort()
+  for (const check of checkCancels.values()) check.controller.abort()
   for (const entry of runQueue.splice(0)) dropQueuedRun(entry, reason)
   for (const cancel of admittedCancels.values()) cancel.abort()
+  cancelActiveArtifactRun()
+}
+
+/**
+ * The Stop button (`artifact:cancel` without an id): the active run, plus any
+ * renderer-submitted run still in its prompt check. Tool runs cancel by id.
+ */
+export function cancelCurrentArtifactRun(): void {
+  for (const check of checkCancels.values()) {
+    if (check.panel) check.controller.abort()
+  }
   cancelActiveArtifactRun()
 }
 

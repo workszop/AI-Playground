@@ -144,11 +144,7 @@ import { ingestDocument, retrieveChunks } from './rag/langchainCalls.ts'
 import { handleChatAnswer, rejectAllChatAsks } from './chat/chatAsk.ts'
 import type { ArtifactMissingModel } from '@/types/mediaRequests'
 import type { IpcOkWith } from '@/types/ipcChannels'
-import {
-  cancelActiveArtifactRun,
-  setArtifactRunnerDeps,
-  type RunnerComfyService,
-} from './artifact/runner'
+import { setArtifactRunnerDeps, type RunnerComfyService } from './artifact/runner'
 import {
   artifactPromptChecked,
   awaitChatWindow,
@@ -156,6 +152,7 @@ import {
   gpuWindowIsMedia,
   cancelArtifactRun,
   cancelAllArtifactRuns,
+  cancelCurrentArtifactRun,
   artifactWorkOpen,
   setOrchestratorDeps,
   submitArtifactRun,
@@ -1759,7 +1756,7 @@ function initEventHandle() {
       appLogger,
       submitArtifactRun,
       cancelArtifactRun,
-      cancelActiveArtifactRun,
+      cancelCurrentArtifactRun,
       handleMediaResponse,
     }),
   )

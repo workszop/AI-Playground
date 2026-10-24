@@ -78,6 +78,8 @@ export type ArtifactResult = {
   /** Items that reached 'done' — the full batch on success, partials otherwise. */
   items: MediaItem[]
   error?: string
+  /** The kids-safe guard refused the prompt; `error` is the message to show. */
+  blocked?: boolean
 }
 
 // Fallbacks when neither the request nor the preset declares a value. Matches
@@ -370,7 +372,10 @@ export async function runArtifact(
   // A refused submission left nothing of this run in flight — drop the queued
   // stubs so the history shows no permanent placeholders.
   if (result.state === 'failed' && result.items.length === 0) {
-    if (
+    if (result.blocked) {
+      // The guard refused the prompt: keep the stubs as a failed generation that shows the message.
+      imageGen.failGeneration(result.error ?? 'Generation failed')
+    } else if (
       result.error === 'Another generation is already in progress' ||
       !items.some((item) => item.state !== 'queued')
     ) {

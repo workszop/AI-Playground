@@ -64,6 +64,15 @@ import { finishTextRequest, submitTextRequest } from '../kernel/orchestrator'
 import { saveChatTurnConversation } from '../persist/conversationFiles'
 import { cloneForIpc } from '@/lib/cloneForIpc'
 import { emitFailure } from '../kernel/kernelBus'
+import {
+  blockedMessageFor,
+  checkKidsPrompt,
+  checkKidsResponse,
+  guardUiMessageStream,
+  isBlocked,
+  lastUserText,
+  textOnlyChunks,
+} from '../safety/kidsGuard'
 
 // ── Main-side chat turn engine (docs/architecture-target.md §7, step 6) ──────
 //
@@ -773,6 +782,29 @@ export function resumeChatTurn(conversationKey: string) {
   return { turnId: turn.turnId, ...captured }
 }
 
+/** Ends a turn with a fixed assistant reply, without loading or calling a model. */
+async function answerWithoutModel(
+  request: ChatTurnRequest,
+  turn: ActiveChatTurn,
+  text: string,
+): Promise<void> {
+  const messageId = `${turn.turnId}-assistant`
+  const chunks: UIMessageChunk[] = [
+    { type: 'start', messageId },
+    ...textOnlyChunks(text),
+    { type: 'finish' },
+  ]
+  for (const chunk of chunks) emitChatChunk(turn.conversationKey, turn.turnId, chunk)
+  if (request.persist) {
+    const assistant: UIMessage = {
+      id: messageId,
+      role: 'assistant',
+      parts: [{ type: 'text', text }],
+    }
+    await persistChatTurn(request, [...request.messages, assistant])
+  }
+}
+
 async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Promise<void> {
   const { conversationKey, turnId } = turn
   const haDiag = request.homeAgentDiagnostics === true
@@ -781,6 +813,13 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
     // User message (and regenerate truncation) land on disk before GPU wait /
     // stream, so a crash mid-turn does not lose the prompt.
     await persistChatTurn(request, request.messages)
+
+    const userText = lastUserText(request.messages)
+    const promptVerdict = await checkKidsPrompt(userText, turn.controller.signal)
+    if (isBlocked(promptVerdict)) {
+      await answerWithoutModel(request, turn, blockedMessageFor(promptVerdict))
+      return
+    }
 
     const config = request.model
     await submitTextRequest(
@@ -1132,7 +1171,7 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
       },
     })
 
-    const stream = patchUiToolOutputs(
+    const unguardedStream = patchUiToolOutputs(
       result.toUIMessageStream({
         onError: describeInferenceError,
         sendReasoning: true,
@@ -1186,6 +1225,10 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
         },
       }),
       pendingToolExecutes,
+    )
+    // Guarded before the tee, so what is persisted is what the child saw.
+    const stream = guardUiMessageStream(unguardedStream, (replyText) =>
+      checkKidsResponse(userText, replyText, turn.controller.signal),
     )
 
     const persistMessages = async (assistant: UIMessage | undefined) => {

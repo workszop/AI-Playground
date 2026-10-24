@@ -13,6 +13,7 @@ import { useBackendServices } from './backendServices'
 import { connectKernelEventStream } from '@/assets/js/projection/kernelProjection'
 import type { ArtifactPhase, ArtifactRunOwner } from '@/types/kernelEvents'
 import { usePresets, presetRequiresUserPrompt, type ComfyInput } from './presets'
+import { ignoresSavedInput } from '@/lib/presetSchemas'
 
 // ComfyUI model-name/path helpers and the optional-model sentinel live in
 // `@/lib/comfyWorkflow` (shared with the main-process artifact runner) and are
@@ -87,7 +88,7 @@ const generalDefaultSettings = {
   prompt: '',
   seed: -1,
   safetyCheck: true,
-  showPreview: true,
+  showPreview: false,
 }
 
 export const backendToService: Record<'comfyui', BackendServiceName> = {
@@ -214,9 +215,10 @@ export const useImageGenerationPresets = defineStore('imageGenerationPresets', (
     }
     const getSavedOrDefault = (input: ComfyInput) => {
       const settingsKey = getSettingsKey()
-      const raw = settingsKey
-        ? (comfyInputsPerPreset.value[settingsKey]?.[inputRef(input)] ?? input.defaultValue)
-        : input.defaultValue
+      const raw =
+        settingsKey && !ignoresSavedInput(input)
+          ? (comfyInputsPerPreset.value[settingsKey]?.[inputRef(input)] ?? input.defaultValue)
+          : input.defaultValue
       if (
         input.type === 'model' &&
         input.optional === true &&
@@ -364,6 +366,10 @@ export const useImageGenerationPresets = defineStore('imageGenerationPresets', (
       targetHeightInput.current.value = newHeight
     }
   })
+
+  const isLocked = (settingName: string): boolean =>
+    activePreset.value?.settings.find((s) => 'settingName' in s && s.settingName === settingName)
+      ?.modifiable === false
 
   const isModifiable = (settingName: string): boolean => {
     if (!activePreset.value) return false
@@ -764,7 +770,9 @@ export const useImageGenerationPresets = defineStore('imageGenerationPresets', (
     )
     const getSavedOrDefault = (settingName: string) => {
       if (!settingsKey) return
-      const saved = settingsPerPreset.value[settingsKey]?.[settingName]
+      const saved = isLocked(settingName)
+        ? undefined
+        : settingsPerPreset.value[settingsKey]?.[settingName]
       const presetValue = getSettingValue(settingName)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const globalDefaultValue: any =

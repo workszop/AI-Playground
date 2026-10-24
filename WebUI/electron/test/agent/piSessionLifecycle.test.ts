@@ -103,6 +103,13 @@ type ResourceLoaderOptions = {
 }
 const resourceLoaderOptions: ResourceLoaderOptions[] = []
 
+// Kids-safe guard: stubbed to "safe" so these tests keep covering their own behavior.
+vi.mock('../../safety/kidsGuard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../safety/kidsGuard')>()),
+  checkKidsPrompt: vi.fn(async () => ({ level: 'safe' })),
+  checkKidsResponse: vi.fn(async () => ({ level: 'safe' })),
+  KIDS_SAFE_AGENT_MODE_DISABLED: false,
+}))
 vi.mock('electron', () => ({
   app: { isPackaged: true, getPath: () => userDataDir },
   BrowserWindow: class {},

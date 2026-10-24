@@ -9,18 +9,31 @@
   "description": "Increase resolution of an image up to 4X",
   "extendedDescription": "Select an upscale factor then drag in, or load an image to upscale. Click generate button. No prompt needed.",
   "toolInstructions": "Use this workflow when the user wants to upscale, enhance resolution, or increase the size of an existing image. This is a no-prompt workflow: the prompt parameter is ignored. Simply select this workflow and the image will be upscaled using RealESRGAN x4plus. Best for making small or low-resolution images larger and sharper.",
-  "requiredCustomNodes": [
-    "evanspearman/ComfyMath@939bb813f1c0ace959b62f20bb2da47190c4e211"
-  ],
+  "requiredCustomNodes": ["evanspearman/ComfyMath@939bb813f1c0ace959b62f20bb2da47190c4e211"],
   "requiredPythonPackages": [],
   "requiredModels": [
     {
       "type": "upscale",
       "model": "Comfy-Org/Real-ESRGAN_repackaged/RealESRGAN_x4plus.safetensors"
+    },
+    {
+      "type": "nsfwdetector",
+      "model": "AdamCodd/vit-base-nsfw-detector/config.json"
+    },
+    {
+      "type": "nsfwdetector",
+      "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors"
+    },
+    {
+      "type": "nsfwdetector",
+      "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json"
     }
   ],
   "variants": [
-    { "name": "Default", "overrides": {} },
+    {
+      "name": "Default",
+      "overrides": {}
+    },
     {
       "name": "OpenVINO Default",
       "displayName": "Default",
@@ -37,6 +50,18 @@
           {
             "type": "upscale",
             "model": "Comfy-Org/Real-ESRGAN_repackaged/RealESRGAN_x4plus.safetensors"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/config.json"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json"
           }
         ],
         "settings": [
@@ -87,7 +112,7 @@
           "9": {
             "inputs": {
               "filename_prefix": "AIPG_Image",
-              "images": ["16", 0]
+              "images": ["9001", 0]
             },
             "class_type": "SaveImage",
             "_meta": {
@@ -115,6 +140,16 @@
             "_meta": {
               "title": "OpenVINO Upscale"
             }
+          },
+          "9001": {
+            "inputs": {
+              "threshold": 0.1,
+              "image": ["16", 0]
+            },
+            "class_type": "SafetyChecker",
+            "_meta": {
+              "title": "Intercept NSFW Outputs"
+            }
           }
         }
       }
@@ -132,7 +167,7 @@
     {
       "type": "boolean",
       "label": "Show Preview",
-      "displayed": true,
+      "displayed": false,
       "modifiable": false,
       "defaultValue": false,
       "settingName": "showPreview"
@@ -163,7 +198,7 @@
     "9": {
       "inputs": {
         "filename_prefix": "AIPG_Image",
-        "images": ["16", 0]
+        "images": ["9001", 0]
       },
       "class_type": "SaveImage",
       "_meta": {
@@ -227,6 +262,16 @@
       "class_type": "PrimitiveFloat",
       "_meta": {
         "title": "upscale_factor"
+      }
+    },
+    "9001": {
+      "inputs": {
+        "threshold": 0.1,
+        "image": ["16", 0]
+      },
+      "class_type": "SafetyChecker",
+      "_meta": {
+        "title": "Intercept NSFW Outputs"
       }
     }
   }

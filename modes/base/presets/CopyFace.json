@@ -141,7 +141,7 @@
     "9": {
       "inputs": {
         "filename_prefix": "AIPG_Image",
-        "images": ["25", 0]
+        "images": ["9001", 0]
       },
       "class_type": "SaveImage",
       "_meta": {
@@ -187,6 +187,16 @@
       "class_type": "LoadImage",
       "_meta": {
         "title": "target_image"
+      }
+    },
+    "9001": {
+      "inputs": {
+        "threshold": 0.1,
+        "image": ["25", 0]
+      },
+      "class_type": "SafetyChecker",
+      "_meta": {
+        "title": "Intercept NSFW Outputs"
       }
     }
   }

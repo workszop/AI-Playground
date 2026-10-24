@@ -127,9 +127,9 @@
     {
       "type": "boolean",
       "label": "Show Preview",
-      "displayed": true,
-      "modifiable": true,
-      "defaultValue": true,
+      "displayed": false,
+      "modifiable": false,
+      "defaultValue": false,
       "settingName": "showPreview"
     },
     {
@@ -137,12 +137,12 @@
       "label": "Safety Check",
       "nodeTitle": "SafetyCheckerStrength",
       "nodeInput": "b",
-      "min": 0,
-      "max": 1,
+      "min": 0.9,
+      "max": 0.9,
       "step": 0.05,
-      "defaultValue": 0.5,
-      "displayed": true,
-      "modifiable": true
+      "defaultValue": 0.9,
+      "displayed": false,
+      "modifiable": false
     }
   ],
   "variants": [

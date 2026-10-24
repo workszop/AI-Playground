@@ -266,7 +266,7 @@ interface LlamaServerProcess {
   port: number
   modelPath: string
   modelRepoId: string
-  type: 'llm' | 'embedding'
+  type: 'llm' | 'embedding' | 'guard'
   contextSize?: number
   isReady: boolean
 }
@@ -315,6 +315,8 @@ export class LlamaCppBackendService implements ApiService {
   // Model server processes
   private llamaLlmProcess: LlamaServerProcess | null = null
   private llamaEmbeddingProcess: LlamaServerProcess | null = null
+  private llamaGuardProcess: LlamaServerProcess | null = null
+  private guardServerStarting: Promise<LlamaServerProcess> | null = null
   private currentLlmModel: string | null = null
   private currentContextSize: number | null = null
   /** The model's own `llamaCppArgs` the running LLM server was launched with. */
@@ -502,6 +504,27 @@ export class LlamaCppBackendService implements ApiService {
       )
       throw error
     }
+  }
+
+  /**
+   * Start (or reuse) the kids-safe guard server (electron/safety/kidsGuard.ts).
+   * It never takes the user's startup parameters, so nothing typed in settings
+   * can change how the guard runs. Resolves to the server's base URL.
+   */
+  async ensureGuardServer(modelPath: string): Promise<string> {
+    if (!this.isSetUp) throw new Error('The Llama.cpp backend is not installed')
+    const running = this.llamaGuardProcess
+    if (running?.isReady && running.modelPath === modelPath && running.process.exitCode === null) {
+      return `http://127.0.0.1:${running.port}`
+    }
+    this.guardServerStarting ??= (async () => {
+      await this.stopLlamaGuardServer()
+      return this.startLlamaGuardServer(modelPath)
+    })().finally(() => {
+      this.guardServerStarting = null
+    })
+    const started = await this.guardServerStarting
+    return `http://127.0.0.1:${started.port}`
   }
 
   /**
@@ -1401,6 +1424,7 @@ export class LlamaCppBackendService implements ApiService {
     // Stop all model servers
     await this.stopLlamaLlmServer()
     await this.stopLlamaEmbeddingServer()
+    await this.stopLlamaGuardServer()
 
     this.setStatus('stopped')
     return 'stopped'
@@ -1788,6 +1812,66 @@ export class LlamaCppBackendService implements ApiService {
       )
       throw error
     }
+  }
+
+  private async startLlamaGuardServer(modelPath: string): Promise<LlamaServerProcess> {
+    const port = await getPort({ port: portNumbers(39300, 39399) })
+    this.appLogger.info(`Starting guard server ${modelPath} on port ${port}`, this.name)
+    const args = [
+      '--model',
+      modelPath,
+      '--port',
+      port.toString(),
+      '--ctx-size',
+      '4096',
+      '--parallel',
+      '1',
+      '--jinja',
+      '--log-prefix',
+      ...withCpuDeviceParameters(['--gpu-layers', '999'], this.selectedDevice()),
+      '--host',
+      '127.0.0.1',
+    ]
+    const childProcess = spawnBackend(this.getActiveLlamaCppExePath(), args, {
+      cwd: this.getActiveLlamaCppDir(),
+      env: this.llamaModelServerEnv(),
+    })
+    const llamaProcess: LlamaServerProcess = {
+      process: childProcess,
+      port,
+      modelPath,
+      modelRepoId: path.basename(modelPath),
+      type: 'guard',
+      isReady: false,
+    }
+    const serverOutput = this.captureServerOutput('[Guard]')
+    childProcess.stdout!.on('data', serverOutput.handle)
+    childProcess.stderr!.on('data', serverOutput.handle)
+    childProcess.on('error', (error: Error) => {
+      this.appLogger.error(`Guard server process error: ${error}`, this.name)
+    })
+    childProcess.on('exit', (code: number | null) => {
+      serverOutput.flush()
+      this.appLogger.info(`Guard server process exited with code: ${code}`, this.name)
+      if (this.llamaGuardProcess === llamaProcess) this.llamaGuardProcess = null
+    })
+    await this.waitForServerReady(`http://127.0.0.1:${port}/health`, childProcess, () => {
+      serverOutput.flush()
+      return serverOutput.tail()
+    })
+    llamaProcess.isReady = true
+    this.llamaGuardProcess = llamaProcess
+    return llamaProcess
+  }
+
+  private async stopLlamaGuardServer(): Promise<void> {
+    if (!this.llamaGuardProcess) return
+    await terminateProcessTree(this.llamaGuardProcess.process, {
+      name: this.name,
+      label: 'guard',
+      appLogger: this.appLogger,
+    })
+    this.llamaGuardProcess = null
   }
 
   private async stopLlamaLlmServer(): Promise<void> {

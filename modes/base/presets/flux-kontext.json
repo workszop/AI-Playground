@@ -131,12 +131,12 @@
       "label": "Safety Check",
       "nodeTitle": "SafetyCheckerStrength",
       "nodeInput": "b",
-      "min": 0,
-      "max": 1,
+      "min": 0.9,
+      "max": 0.9,
       "step": 0.05,
-      "defaultValue": 0.5,
-      "displayed": true,
-      "modifiable": true
+      "defaultValue": 0.9,
+      "displayed": false,
+      "modifiable": false
     },
     {
       "type": "boolean",
@@ -200,6 +200,18 @@
           {
             "type": "vae",
             "model": "Comfy-Org/Lumina_Image_2.0_Repackaged/split_files/vae/ae.safetensors"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/config.json"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json"
           }
         ],
         "settings": [

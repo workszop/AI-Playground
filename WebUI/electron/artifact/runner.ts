@@ -65,6 +65,7 @@ import {
 import { buildDummyGlb, DUMMY_3D_PRESET_NAME, VIEW_FIXTURE } from '@/lib/devPresetWorkflows'
 import { saveMediaItems } from '../persist/mediaItemFiles'
 import { extractMessage } from '@/assets/js/errors/appError'
+import { blockedMessageFor, checkKidsPrompt, isBlocked } from '../safety/kidsGuard'
 
 const appLogger = appLoggerInstance
 
@@ -713,23 +714,15 @@ function handleWebsocketMessage(run: ActiveRun, msg: unknown): void {
   }
 }
 
-function handleBinaryPreview(run: ActiveRun, mime: string, bytes: ArrayBuffer): void {
-  if (run.settled || activeRun !== run) return
-  if (run.payload.showPreview === false) return
-  const current = run.items[run.generateIdx]
-  if (!current || current.state === 'done') return
-  const base64 = Buffer.from(bytes).toString('base64')
-  emitItem(run, {
-    ...(current as MediaItem),
-    state: 'generating',
-    type: 'image',
-    imageUrl: `data:${mime};base64,${base64}`,
-  } as MediaItem)
-}
-
 async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void> {
   armIdleTimeout(run)
   setPhase(run, 'preparing-backend')
+
+  const promptVerdict = await checkKidsPrompt(run.payload.params.prompt)
+  if (isBlocked(promptVerdict)) {
+    failRun(run, blockedMessageFor(promptVerdict), false)
+    return
+  }
 
   // In-process tool runs did not go through the renderer's model pre-flight.
   if (run.payload.modelsConsented !== true) {
@@ -814,7 +807,8 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
   ]
 
   const socket = getComfySocket(baseUrl, clientDeps(), run.clientId, {
-    onBinaryPreview: (mime, bytes) => handleBinaryPreview(run, mime, bytes),
+    // Kids-safe build: previews are unfiltered intermediate frames, so none are shown.
+    onBinaryPreview: () => {},
     onJson: (msg) => handleWebsocketMessage(run, msg),
     onClose: (code) => {
       if (!run.settled && activeRun === run && code !== WEBSOCKET_CLOSED_BY_POLICY) {

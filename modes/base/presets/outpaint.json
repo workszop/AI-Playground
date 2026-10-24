@@ -553,6 +553,18 @@
           {
             "type": "openvino-image",
             "model": "OpenVINO/dreamshaper-8-inpainting-int8-ov"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/config.json"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json"
           }
         ],
         "settings": [
@@ -599,9 +611,9 @@
           {
             "type": "boolean",
             "label": "Safety Check",
-            "displayed": true,
-            "modifiable": true,
-            "defaultValue": false,
+            "displayed": false,
+            "modifiable": false,
+            "defaultValue": true,
             "settingName": "safetyCheck"
           },
           {
@@ -842,23 +854,45 @@
             }
           },
           "60": {
-            "inputs": { "a": 512, "b": 0, "operation": "add" },
+            "inputs": {
+              "a": 512,
+              "b": 0,
+              "operation": "add"
+            },
             "class_type": "IntMathOperation",
-            "_meta": { "title": "width" }
+            "_meta": {
+              "title": "width"
+            }
           },
           "61": {
-            "inputs": { "a": 512, "b": 0, "operation": "add" },
+            "inputs": {
+              "a": 512,
+              "b": 0,
+              "operation": "add"
+            },
             "class_type": "IntMathOperation",
-            "_meta": { "title": "height" }
+            "_meta": {
+              "title": "height"
+            }
           },
           "3": {
             "inputs": {
               "filename_prefix": "AIPG_OVMS_outpaint",
-              "images": ["50", 0]
+              "images": ["9001", 0]
             },
             "class_type": "SaveImage",
             "_meta": {
               "title": "Save Image"
+            }
+          },
+          "9001": {
+            "inputs": {
+              "threshold": 0.1,
+              "image": ["50", 0]
+            },
+            "class_type": "SafetyChecker",
+            "_meta": {
+              "title": "Intercept NSFW Outputs"
             }
           }
         }
@@ -879,6 +913,18 @@
           {
             "type": "openvino-image",
             "model": "OpenVINO/Juggernaut-XL-v9-int8-ov"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/config.json"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors"
+          },
+          {
+            "type": "nsfwdetector",
+            "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json"
           }
         ],
         "settings": [
@@ -925,9 +971,9 @@
           {
             "type": "boolean",
             "label": "Safety Check",
-            "displayed": true,
-            "modifiable": true,
-            "defaultValue": false,
+            "displayed": false,
+            "modifiable": false,
+            "defaultValue": true,
             "settingName": "safetyCheck"
           },
           {
@@ -1168,23 +1214,45 @@
             }
           },
           "60": {
-            "inputs": { "a": 1024, "b": 0, "operation": "add" },
+            "inputs": {
+              "a": 1024,
+              "b": 0,
+              "operation": "add"
+            },
             "class_type": "IntMathOperation",
-            "_meta": { "title": "width" }
+            "_meta": {
+              "title": "width"
+            }
           },
           "61": {
-            "inputs": { "a": 1024, "b": 0, "operation": "add" },
+            "inputs": {
+              "a": 1024,
+              "b": 0,
+              "operation": "add"
+            },
             "class_type": "IntMathOperation",
-            "_meta": { "title": "height" }
+            "_meta": {
+              "title": "height"
+            }
           },
           "3": {
             "inputs": {
               "filename_prefix": "AIPG_OVMS_outpaint_HD",
-              "images": ["50", 0]
+              "images": ["9001", 0]
             },
             "class_type": "SaveImage",
             "_meta": {
               "title": "Save Image"
+            }
+          },
+          "9001": {
+            "inputs": {
+              "threshold": 0.1,
+              "image": ["50", 0]
+            },
+            "class_type": "SafetyChecker",
+            "_meta": {
+              "title": "Intercept NSFW Outputs"
             }
           }
         }
@@ -1267,9 +1335,9 @@
     {
       "type": "boolean",
       "label": "Show Preview",
-      "displayed": true,
-      "modifiable": true,
-      "defaultValue": true,
+      "displayed": false,
+      "modifiable": false,
+      "defaultValue": false,
       "settingName": "showPreview"
     },
     {
@@ -1277,12 +1345,12 @@
       "label": "Safety Check",
       "nodeTitle": "SafetyCheckerStrength",
       "nodeInput": "b",
-      "min": 0,
-      "max": 1,
+      "min": 0.9,
+      "max": 0.9,
       "step": 0.05,
-      "defaultValue": 0.5,
-      "displayed": true,
-      "modifiable": true
+      "defaultValue": 0.9,
+      "displayed": false,
+      "modifiable": false
     },
     {
       "type": "image",

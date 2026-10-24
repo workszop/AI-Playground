@@ -15,6 +15,7 @@
 #
 # Modified to use local model paths from ComfyUI's
 # folder_paths instead of HuggingFace Hub for offline capability.
+# Modified for the kids-safe build to check every image in the batch.
 
 import os
 
@@ -54,14 +55,18 @@ class SafetyChecker:
             device=device,
         )  # init pipeline
         result = predict(
-            Image.fromarray((image[0].cpu().numpy() * 255).astype(np.uint8))
+            [
+                Image.fromarray((img.cpu().numpy() * 255).astype(np.uint8))
+                for img in image
+            ]
         )  # Convert to expected format
-        score = next(item["score"] for item in result if item["label"] == "nsfw")
+        score = max(
+            next(item["score"] for item in res if item["label"] == "nsfw")
+            for res in result
+        )
         output = image
         if float(score) > threshold:
-            output = torch.zeros(
-                1, 512, 512, dtype=torch.float32
-            )  # create black image tensor
+            output = torch.zeros_like(image)  # black out the whole batch
         return (output, str(score))
 
 

@@ -128,7 +128,7 @@
     {
       "type": "boolean",
       "label": "Show Preview",
-      "displayed": true,
+      "displayed": false,
       "modifiable": false,
       "defaultValue": false,
       "settingName": "showPreview"
@@ -142,7 +142,7 @@
       "max": 1,
       "step": 0.05,
       "defaultValue": 0.93,
-      "displayed": true,
+      "displayed": false,
       "modifiable": false
     }
   ],

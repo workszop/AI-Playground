@@ -290,6 +290,14 @@ export function presetRequiresUserPrompt(preset: ComfyUiPreset): boolean {
   )
 }
 
+/**
+ * A locked safety strength must always use the preset default, never a saved value.
+ * Other locked inputs (outpaint offsets, mask crops) are set programmatically and saved.
+ */
+export function ignoresSavedInput(input: ComfyInput): boolean {
+  return input.modifiable === false && input.nodeTitle === 'SafetyCheckerStrength'
+}
+
 export function validatePreset(data: unknown): Preset | null {
   try {
     return PresetSchema.parse(data)

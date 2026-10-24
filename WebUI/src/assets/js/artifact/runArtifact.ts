@@ -12,6 +12,7 @@ import { imageUrlToDataUri } from '@/lib/utils'
 import { cloneForIpc } from '@/lib/cloneForIpc'
 import { isCancellation } from '../errors/appError'
 import { presetToMode } from '@/lib/presetModes'
+import { ignoresSavedInput } from '@/lib/presetSchemas'
 
 /**
  * Renderer-side Artifact capability: one fully-resolved request in, one settled
@@ -165,7 +166,10 @@ function resolveInputs(
     (s): s is ComfyInput => 'nodeTitle' in s && 'nodeInput' in s,
   )
   return inputSettings.map((input) => {
-    const raw = savedInputs?.[`${input.nodeTitle}.${input.nodeInput}`] ?? input.defaultValue
+    const saved = ignoresSavedInput(input)
+      ? undefined
+      : savedInputs?.[`${input.nodeTitle}.${input.nodeInput}`]
+    const raw = saved ?? input.defaultValue
     const current =
       input.type === 'model' &&
       input.optional === true &&

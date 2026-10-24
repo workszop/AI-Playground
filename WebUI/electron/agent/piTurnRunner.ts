@@ -38,6 +38,7 @@ import {
 import { endActiveSession, ensureSession } from './piSessionLifecycle.ts'
 import { agentRunIdentity } from './agentRunIdentity.ts'
 import { setAgentRunIdentity } from '../observability/laminarAttributes.ts'
+import { KIDS_SAFE_AGENT_MODE_DISABLED } from '../safety/kidsGuard.ts'
 import { finishTextRequest, submitTextRequest } from '../kernel/orchestrator.ts'
 import { ensureChatBackendReady, setLastChatBackendLoadActive } from '../chat/chatReadiness.ts'
 
@@ -311,6 +312,10 @@ export async function startAgentTurn(
   prompt: string,
   config: AgentModeTurnConfig,
 ): Promise<IpcMutationResult> {
+  // Kids-safe build: agent turns stream outside the chat guard, so they stay off.
+  if (KIDS_SAFE_AGENT_MODE_DISABLED) {
+    return { success: false, error: 'Agent mode is turned off in the kids-safe build.' }
+  }
   if (activeAbort) {
     return { success: false, error: 'An agent turn is already running.' }
   }

@@ -57,7 +57,11 @@ import { HomeAgentBackendService } from './adapters/backends/homeAgentBackendSer
 import { setCloudProviderKeyReader } from './adapters/cloudUpstream'
 import { Qwen3TtsBackendService } from './adapters/backends/qwen3TtsBackendService'
 import { WhisperBackendService } from './adapters/backends/whisperBackendService'
-import { LLAMACPP_DEFAULT_PARAMETERS } from './adapters/backends/llamaCppBackendService'
+import {
+  LLAMACPP_DEFAULT_PARAMETERS,
+  LlamaCppBackendService,
+} from './adapters/backends/llamaCppBackendService'
+import { setKidsGuardDeps } from './safety/kidsGuard'
 import { filterPartnerPresets, updateIntelPresets } from './adapters/updateIntelPresets.ts'
 import {
   invalidatePresetCatalog,
@@ -1364,6 +1368,21 @@ function wireChatEngine(): void {
   })
 }
 
+/** The kids-safe text guard runs on its own llama-server inside the Llama.cpp service. */
+function wireKidsGuard(pathsManager: PathsManager): void {
+  setKidsGuardDeps({
+    ggufModelDir: () => pathsManager.modelPaths.ggufLLM,
+    ensureGuardServer: async (modelPath) => {
+      const service = serviceRegistry?.getService('llamacpp-backend')
+      if (!(service instanceof LlamaCppBackendService)) {
+        throw new Error('The Llama.cpp backend is required for the safety filter')
+      }
+      return service.ensureGuardServer(modelPath)
+    },
+    requestModelConsent: (models) => requestDownloadConsent(models),
+  })
+}
+
 /**
  * The artifact runner and GPU occupancy wrap (architecture-target §4.1 step 5)
  * run in main; everything they need that lives renderer-side — the model
@@ -1593,6 +1612,7 @@ function initEventHandle() {
       ? path.join(packagedResourcesRoot(), 'model_config.json')
       : path.join(externalRes, 'model_config.dev.defaults.json'),
   )
+  wireKidsGuard(pathsManager)
 
   const coreDeps: CoreDeps = {
     getWin: () => win ?? undefined,

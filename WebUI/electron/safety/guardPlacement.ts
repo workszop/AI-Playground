@@ -13,7 +13,7 @@ export type GuardPlacement = {
 export type HardwareClass = 'cpu-only' | 'igpu' | 'dgpu'
 export type GuardFacts = {
   hardwareClass: HardwareClass
-  /** The llama.cpp device the guard may use on the GPU (Vulkan id like "Vulkan0"), when there is one. */
+  /** The GPU the guard may use, by the llama.cpp service's own device id, when there is one. */
   gpu?: { llamaDeviceId: string; totalBytes?: number; freeBytes?: number }
   host: { totalBytes?: number; freeBytes?: number }
   /** Windows iGPU allocation cap (dedicated + shared), when known. */

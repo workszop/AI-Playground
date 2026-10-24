@@ -266,7 +266,7 @@ export async function detectGpuHardwareDevices(): Promise<{
   return { detected, hasNvidia: nvidia.length > 0 }
 }
 
-function toReferenceAccelerator(device: GpuHardwareDevice): ReferenceAccelerator {
+export function toReferenceAccelerator(device: GpuHardwareDevice): ReferenceAccelerator {
   const vendor: ReferenceAccelerator['vendor'] = device.device.startsWith('NVIDIA')
     ? 'nvidia'
     : device.device.startsWith('INTEL')

@@ -61,7 +61,10 @@ import {
   LLAMACPP_DEFAULT_PARAMETERS,
   LlamaCppBackendService,
 } from './adapters/backends/llamaCppBackendService'
-import { setKidsGuardDeps } from './safety/kidsGuard'
+import { kidsGuardChecksActive, setKidsGuardDeps } from './safety/kidsGuard'
+import { collectGuardFacts } from './safety/guardFacts'
+import { planGuardPlacements } from './safety/guardPlacement'
+import { readCpuTopology } from './safety/cpuTopology'
 import { filterPartnerPresets, updateIntelPresets } from './adapters/updateIntelPresets.ts'
 import {
   invalidatePresetCatalog,
@@ -142,6 +145,7 @@ import {
 } from './artifact/runner'
 import {
   awaitChatWindow,
+  gpuWindowIsMedia,
   cancelArtifactRun,
   cancelAllArtifactRuns,
   artifactWorkOpen,
@@ -297,6 +301,7 @@ import {
   classifyDetectedDevices,
   detectGpuHardwareDevices,
   getXpuSmiExePath,
+  toReferenceAccelerator,
 } from './adapters/hardware/hardwareDiscovery.ts'
 import { registerSettingsPersist } from './adapters/hardware/defaultDeviceSelection.ts'
 import { appShutdown } from './kernel/shutdown.ts'
@@ -309,6 +314,8 @@ import {
   shutdownLaminarTracing,
 } from './observability/laminar.ts'
 import {
+  hostMemorySnapshot,
+  latestComputeSnapshot,
   setComputeMetricsSink,
   startComputeMetricsSampler,
 } from './adapters/hardware/computeMetrics.ts'
@@ -1370,25 +1377,41 @@ function wireChatEngine(): void {
 
 /** The kids-safe text guard runs on its own llama-server inside the Llama.cpp service. */
 function wireKidsGuard(pathsManager: PathsManager): void {
+  const llamaService = () => {
+    const service = serviceRegistry?.getService('llamacpp-backend')
+    if (!(service instanceof LlamaCppBackendService)) {
+      throw new Error('The Llama.cpp backend is required for the safety filter')
+    }
+    return service
+  }
+  // The physical GPUs do not change while the app runs; probe once, before any model server
+  // is up (xpu-smi's Level Zero calls can reset a running Vulkan llama.cpp on Windows).
+  const gpuReference = detectGpuHardwareDevices()
+    .then((probe) => probe.detected.map(toReferenceAccelerator))
+    .catch((error) => {
+      appLogger.warn(`Guard GPU probe failed: ${String(error)}`, 'kids-guard')
+      return []
+    })
   setKidsGuardDeps({
     ggufModelDir: () => pathsManager.modelPaths.ggufLLM,
-    ensureGuardServer: async (modelPath) => {
-      const service = serviceRegistry?.getService('llamacpp-backend')
-      if (!(service instanceof LlamaCppBackendService)) {
-        throw new Error('The Llama.cpp backend is required for the safety filter')
-      }
-      // Temporary stand-in: Task 3 replaces it with the real placement planner.
-      const device = service.devices.find((d) => d.selected)
-      const isCpu = !device || device.id.toLowerCase() === 'cpu'
-      return service.ensureGuardServer(modelPath, {
-        model: '4B',
-        device: isCpu ? { kind: 'cpu' } : { kind: 'gpu', llamaDeviceId: device.id },
-        threads: isCpu ? 4 : 2,
-        batchThreads: isCpu ? 8 : 2,
-        stopForMedia: true,
-      })
-    },
     requestModelConsent: (models) => requestDownloadConsent(models),
+    planGuard: async () => {
+      const service = llamaService()
+      const facts = await collectGuardFacts({
+        llamaDevices: () => service.listedLlamaCppDevices(),
+        selectedDeviceId: () => service.devices.find((device) => device.selected)?.id,
+        gpuReference: () => gpuReference,
+        hostMemory: hostMemorySnapshot,
+        gpuSamples: () => latestComputeSnapshot()?.gpus ?? [],
+        platform: () => process.platform,
+        cpuTopology: () => readCpuTopology(),
+      })
+      return planGuardPlacements(facts)
+    },
+    ensureGuardServer: (modelPath, placement) =>
+      llamaService().ensureGuardServer(modelPath, placement),
+    mediaWindowActive: gpuWindowIsMedia,
+    awaitChatWindow,
   })
 }
 
@@ -1457,7 +1480,8 @@ function wireArtifactRunner(settings: LocalSettings): void {
       })
     },
     restartChatBackend: reloadLastChatBackend,
-    chatRequestsOpen: () => chatInferenceStreamsActive() + piAgentCallsActive(),
+    chatRequestsOpen: () =>
+      chatInferenceStreamsActive() + piAgentCallsActive() + kidsGuardChecksActive(),
   })
 }
 

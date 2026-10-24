@@ -483,6 +483,11 @@ function windowIsMedia(): boolean {
   return gpuWindow === 'media'
 }
 
+/** Whether an artifact run holds the GPU window (read-only view for the kids guard). */
+export function gpuWindowIsMedia(): boolean {
+  return windowIsMedia()
+}
+
 async function acquireMediaWindow(conversationKey?: string, signal?: AbortSignal): Promise<void> {
   if (!orchestratorDeps) return
   if (windowIsMedia()) return

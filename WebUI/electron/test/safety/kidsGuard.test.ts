@@ -9,17 +9,23 @@ vi.mock('../../observability/logger.ts', () => ({
   appLoggerInstance: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }))
 
+import type { GuardPlacement, GuardPlan } from '../../safety/guardPlacement'
 import {
   KIDS_BLOCKED_MESSAGE,
+  KIDS_GUARD_ALLOW_SMALL_FALLBACK,
   KIDS_GUARD_MODEL_DIR,
   KIDS_GUARD_MODEL_FILE,
   KIDS_GUARD_MODEL_REPO,
+  KIDS_GUARD_SMALL_MODEL_DIR,
+  KIDS_GUARD_SMALL_MODEL_FILE,
+  KIDS_GUARD_SMALL_MODEL_REPO,
   buildGuardPrompt,
   checkKidsPrompt,
   checkKidsResponse,
   guardUiMessageStream,
   guardWindows,
   isBlocked,
+  kidsGuardChecksActive,
   lastUserText,
   matchesBlocklist,
   neutralizeGuardInput,
@@ -158,6 +164,45 @@ describe('helpers', () => {
   })
 })
 
+const MODEL_FILES: Record<string, [string, string]> = {
+  [KIDS_GUARD_MODEL_REPO]: [KIDS_GUARD_MODEL_DIR, KIDS_GUARD_MODEL_FILE],
+  [KIDS_GUARD_SMALL_MODEL_REPO]: [KIDS_GUARD_SMALL_MODEL_DIR, KIDS_GUARD_SMALL_MODEL_FILE],
+}
+
+function writeModel(modelDir: string, repo: string) {
+  const [dir, file] = MODEL_FILES[repo]
+  mkdirSync(path.join(modelDir, dir), { recursive: true })
+  writeFileSync(path.join(modelDir, dir, file), '')
+}
+
+const placement = (
+  model: GuardPlacement['model'],
+  device: GuardPlacement['device'],
+  stopForMedia = false,
+): GuardPlacement => ({ model, device, threads: 2, batchThreads: 2, stopForMedia })
+const GPU_4B = placement('4B', { kind: 'gpu', llamaDeviceId: '0' }, true)
+const CPU_4B = placement('4B', { kind: 'cpu' })
+const GPU_SMALL = placement('0.6B', { kind: 'gpu', llamaDeviceId: '0' }, true)
+const CPU_SMALL = placement('0.6B', { kind: 'cpu' })
+
+const answerWith = (fetchMock: ReturnType<typeof vi.fn>, content: string) =>
+  fetchMock.mockImplementation(
+    async () => new Response(JSON.stringify({ content }), { status: 200 }),
+  )
+
+function guardDeps(modelDir: string, plan: GuardPlan): KidsGuardDeps {
+  return {
+    ggufModelDir: () => modelDir,
+    requestModelConsent: vi.fn(async (models: unknown[]) => {
+      for (const model of models as { repo_id: string }[]) writeModel(modelDir, model.repo_id)
+    }),
+    planGuard: vi.fn(async () => plan),
+    ensureGuardServer: vi.fn(async () => 'http://127.0.0.1:39300'),
+    mediaWindowActive: () => false,
+    awaitChatWindow: vi.fn(async () => {}),
+  }
+}
+
 describe('guard calls', () => {
   let modelDir: string
   let deps: KidsGuardDeps
@@ -165,15 +210,7 @@ describe('guard calls', () => {
 
   beforeEach(() => {
     modelDir = mkdtempSync(path.join(os.tmpdir(), 'kids-guard-'))
-    deps = {
-      ggufModelDir: () => modelDir,
-      ensureGuardServer: vi.fn(async () => 'http://127.0.0.1:39300'),
-      requestModelConsent: vi.fn(async () => {
-        const dir = path.join(modelDir, KIDS_GUARD_MODEL_DIR)
-        mkdirSync(dir, { recursive: true })
-        writeFileSync(path.join(dir, KIDS_GUARD_MODEL_FILE), '')
-      }),
-    }
+    deps = guardDeps(modelDir, { chat: [GPU_4B], media: [] })
     setKidsGuardDeps(deps)
     vi.stubGlobal('fetch', fetchMock)
   })
@@ -184,22 +221,38 @@ describe('guard calls', () => {
     fetchMock.mockReset()
   })
 
-  const answer = (content: string) =>
-    fetchMock.mockImplementation(
-      async () => new Response(JSON.stringify({ content }), { status: 200 }),
-    )
+  const answer = (content: string) => answerWith(fetchMock, content)
 
-  it('downloads the guard model through consent once, then judges the prompt', async () => {
+  it('downloads both guard models through one consent, then judges the prompt', async () => {
     answer('Safety: Safe')
+    expect(KIDS_GUARD_ALLOW_SMALL_FALLBACK).toBe(true)
     expect(await checkKidsPrompt('kot w kosmosie')).toEqual({ level: 'safe' })
     expect(await checkKidsPrompt('pies w kosmosie')).toEqual({ level: 'safe' })
     expect(deps.requestModelConsent).toHaveBeenCalledTimes(1)
     expect(deps.requestModelConsent).toHaveBeenCalledWith([
       expect.objectContaining({ repo_id: KIDS_GUARD_MODEL_REPO, type: 'ggufLLM' }),
+      expect.objectContaining({ repo_id: KIDS_GUARD_SMALL_MODEL_REPO, type: 'ggufLLM' }),
     ])
+    expect(deps.ensureGuardServer).toHaveBeenCalledWith(
+      path.join(modelDir, KIDS_GUARD_MODEL_DIR, KIDS_GUARD_MODEL_FILE),
+      GPU_4B,
+    )
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('http://127.0.0.1:39300/completion')
     expect(JSON.parse(init.body).prompt).toContain('USER: kot w kosmosie')
+  })
+
+  it('asks consent only for the models that are missing', async () => {
+    answer('Safety: Safe')
+    writeModel(modelDir, KIDS_GUARD_MODEL_REPO)
+    await checkKidsPrompt('kot')
+    expect(deps.requestModelConsent).toHaveBeenCalledWith([
+      expect.objectContaining({ repo_id: KIDS_GUARD_SMALL_MODEL_REPO }),
+    ])
+    writeModel(modelDir, KIDS_GUARD_SMALL_MODEL_REPO)
+    setKidsGuardDeps(deps)
+    await checkKidsPrompt('kot')
+    expect(deps.requestModelConsent).toHaveBeenCalledTimes(1)
   })
 
   it('blocks controversial and unsafe verdicts', async () => {
@@ -249,6 +302,208 @@ describe('guard calls', () => {
     expect(await checkKidsPrompt('   ')).toEqual({ level: 'safe' })
     expect((await checkKidsPrompt('naga kobieta')).level).toBe('unsafe')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('guard placement fallback', () => {
+  let modelDir: string
+  const fetchMock = vi.fn()
+  const modelPath = (dir: string, file: string) => path.join(modelDir, dir, file)
+
+  beforeEach(() => {
+    modelDir = mkdtempSync(path.join(os.tmpdir(), 'kids-guard-'))
+    vi.stubGlobal('fetch', fetchMock)
+    answerWith(fetchMock, 'Safety: Safe')
+  })
+
+  afterEach(() => {
+    setKidsGuardDeps(null)
+    vi.unstubAllGlobals()
+    fetchMock.mockReset()
+  })
+
+  const wire = (plan: GuardPlan, overrides: Partial<KidsGuardDeps> = {}) => {
+    const deps = { ...guardDeps(modelDir, plan), ...overrides }
+    setKidsGuardDeps(deps)
+    return deps
+  }
+  const startedPlacements = (deps: KidsGuardDeps) =>
+    vi.mocked(deps.ensureGuardServer).mock.calls.map(([, used]) => used)
+
+  it('keeps the 4B placements when the 0.6B download is declined', async () => {
+    const deps = wire(
+      { chat: [GPU_SMALL, CPU_4B, CPU_SMALL], media: [] },
+      {
+        requestModelConsent: vi.fn(async () => {
+          writeModel(modelDir, KIDS_GUARD_MODEL_REPO)
+          throw new Error('declined')
+        }),
+      },
+    )
+    expect(await checkKidsPrompt('kot')).toEqual({ level: 'safe' })
+    expect(deps.ensureGuardServer).toHaveBeenCalledTimes(1)
+    expect(deps.ensureGuardServer).toHaveBeenCalledWith(
+      modelPath(KIDS_GUARD_MODEL_DIR, KIDS_GUARD_MODEL_FILE),
+      CPU_4B,
+    )
+    await checkKidsPrompt('pies')
+    expect(deps.requestModelConsent).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves to the next placement when a server fails to start', async () => {
+    const deps = wire(
+      { chat: [GPU_4B, CPU_4B], media: [] },
+      {
+        ensureGuardServer: vi
+          .fn()
+          .mockRejectedValueOnce(new Error('out of memory'))
+          .mockResolvedValue('http://127.0.0.1:39301'),
+      },
+    )
+    expect(await checkKidsPrompt('kot')).toEqual({ level: 'safe' })
+    expect(startedPlacements(deps)).toEqual([GPU_4B, CPU_4B])
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:39301/completion')
+  })
+
+  it('moves to the next placement when the guard request fails', async () => {
+    const deps = wire(
+      { chat: [GPU_4B, CPU_SMALL], media: [] },
+      {
+        ensureGuardServer: vi.fn(async (_path: string, used: GuardPlacement) =>
+          used.device.kind === 'gpu' ? 'http://gpu' : 'http://cpu',
+        ),
+      },
+    )
+    fetchMock.mockImplementation(async (url: string) =>
+      url.startsWith('http://gpu')
+        ? new Response('boom', { status: 500 })
+        : new Response(JSON.stringify({ content: 'Safety: Safe' }), { status: 200 }),
+    )
+    expect(await checkKidsPrompt('kot')).toEqual({ level: 'safe' })
+    expect(startedPlacements(deps)).toEqual([GPU_4B, CPU_SMALL])
+  })
+
+  it('skips a placement that failed twice in a row and retries one that recovered', async () => {
+    const ensure = vi.fn(async (_path: string, used: GuardPlacement) => {
+      if (used === GPU_4B) throw new Error('device lost')
+      return 'http://127.0.0.1:39300'
+    })
+    const deps = wire({ chat: [GPU_4B, CPU_4B], media: [] }, { ensureGuardServer: ensure })
+    for (let i = 0; i < 3; i++) expect((await checkKidsPrompt(`kot ${i}`)).level).toBe('safe')
+    expect(startedPlacements(deps)).toEqual([GPU_4B, CPU_4B, GPU_4B, CPU_4B, CPU_4B])
+
+    ensure.mockClear()
+    let gpuFails = true
+    ensure.mockImplementation(async (_path: string, used: GuardPlacement) => {
+      if (used.device.kind === 'gpu' && gpuFails) throw new Error('busy')
+      return 'http://127.0.0.1:39300'
+    })
+    setKidsGuardDeps({ ...deps, ensureGuardServer: ensure })
+    await checkKidsPrompt('a')
+    gpuFails = false
+    await checkKidsPrompt('b')
+    gpuFails = true
+    await checkKidsPrompt('c')
+    await checkKidsPrompt('d')
+    expect(ensure.mock.calls.map(([, used]) => used.device.kind)).toEqual([
+      'gpu',
+      'cpu',
+      'gpu',
+      'gpu',
+      'cpu',
+      'gpu',
+      'cpu',
+    ])
+  })
+
+  it('blocks as unavailable when every placement fails', async () => {
+    const deps = wire(
+      { chat: [GPU_4B, CPU_4B], media: [] },
+      { ensureGuardServer: vi.fn().mockRejectedValue(new Error('no server')) },
+    )
+    const verdict = await checkKidsPrompt('kot')
+    expect(verdict.level).toBe('unavailable')
+    expect(isBlocked(verdict)).toBe(true)
+    expect(deps.ensureGuardServer).toHaveBeenCalledTimes(2)
+  })
+
+  it('blocks as unavailable when the plan is empty', async () => {
+    wire({ chat: [], media: [] })
+    expect((await checkKidsPrompt('kot')).level).toBe('unavailable')
+  })
+
+  it('uses the media placements during a media window', async () => {
+    const deps = wire(
+      { chat: [GPU_4B, CPU_4B], media: [CPU_4B] },
+      { mediaWindowActive: () => true },
+    )
+    expect(await checkKidsPrompt('kot')).toEqual({ level: 'safe' })
+    expect(startedPlacements(deps)).toEqual([CPU_4B])
+    expect(deps.awaitChatWindow).not.toHaveBeenCalled()
+  })
+
+  it('waits for the chat window when no placement may run during media', async () => {
+    let media = true
+    let open: () => void = () => {}
+    const deps = wire(
+      { chat: [GPU_4B], media: [] },
+      {
+        mediaWindowActive: () => media,
+        awaitChatWindow: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              open = () => {
+                media = false
+                resolve()
+              }
+            }),
+        ),
+      },
+    )
+    const controller = new AbortController()
+    const verdict = checkKidsPrompt('kot', controller.signal)
+    await vi.waitFor(() => expect(deps.awaitChatWindow).toHaveBeenCalledWith(controller.signal))
+    expect(deps.ensureGuardServer).not.toHaveBeenCalled()
+    open()
+    expect(await verdict).toEqual({ level: 'safe' })
+    expect(startedPlacements(deps)).toEqual([GPU_4B])
+  })
+
+  it('blocks on an unparseable answer without trying another placement', async () => {
+    const deps = wire({ chat: [GPU_4B, CPU_4B], media: [] })
+    answerWith(fetchMock, 'Dawno temu')
+    expect((await checkKidsPrompt('kot')).level).toBe('unavailable')
+    expect(startedPlacements(deps)).toEqual([GPU_4B])
+  })
+
+  it('does not fall back once the caller has cancelled the check', async () => {
+    const controller = new AbortController()
+    const deps = wire({ chat: [GPU_4B, CPU_4B], media: [] })
+    fetchMock.mockImplementation(async () => {
+      controller.abort()
+      throw new DOMException('aborted', 'AbortError')
+    })
+    expect((await checkKidsPrompt('kot', controller.signal)).level).toBe('unavailable')
+    expect(startedPlacements(deps)).toEqual([GPU_4B])
+  })
+
+  it('counts checks in flight', async () => {
+    let release: (() => void) | null = null
+    wire(
+      { chat: [CPU_4B], media: [] },
+      {
+        ensureGuardServer: vi.fn(
+          () => new Promise<string>((resolve) => (release = () => resolve('http://x'))),
+        ),
+      },
+    )
+    expect(kidsGuardChecksActive()).toBe(0)
+    const verdict = checkKidsPrompt('kot')
+    expect(kidsGuardChecksActive()).toBe(1)
+    await vi.waitFor(() => expect(release).not.toBeNull())
+    release!()
+    await verdict
+    expect(kidsGuardChecksActive()).toBe(0)
   })
 })
 

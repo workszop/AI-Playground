@@ -104,6 +104,74 @@ export function withCpuDeviceParameters(
   return [...out, '--gpu-layers', '0']
 }
 
+/** A device `llama-server --list-devices` printed, under the service's own id. */
+export type ListedLlamaCppDevice = {
+  id: string
+  name: string
+  totalBytes?: number
+  freeBytes?: number
+}
+
+const DEVICE_MEMORY_PATTERN = /^\(\s*(\d+)\s*MiB\s*,\s*(\d+)\s*MiB\s+free\s*\)$/
+
+/**
+ * Parse `--list-devices` output (stdout and stderr together: Phison's fork and
+ * recent upstream builds write the list to stderr). Device entries always end
+ * with a memory tuple like `(<N> MiB, <N> MiB free)`; log lines after the header
+ * (`build:`, `load_backend:`, ...) don't, so the tuple is the device-row
+ * discriminator across Vulkan / CUDA / SYCL / HIP / MTL / BLAS builds.
+ */
+export function parseLlamaCppDeviceList(output: string): ListedLlamaCppDevice[] {
+  const devices: ListedLlamaCppDevice[] = []
+  const lines = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  let foundDevicesSection = false
+  for (const line of lines) {
+    if (line.startsWith('Available devices:')) {
+      foundDevicesSection = true
+      continue
+    }
+    if (!foundDevicesSection || !line.includes(':')) continue
+    const colonIndex = line.indexOf(':')
+    if (colonIndex <= 0) continue
+
+    const deviceInfo = line.substring(colonIndex + 1).trim()
+    const lastParenIndex = deviceInfo.lastIndexOf('(')
+    if (lastParenIndex <= 0) continue
+    const memoryInfo = deviceInfo.substring(lastParenIndex)
+    if (
+      !memoryInfo.includes('MiB') &&
+      !memoryInfo.includes('GiB') &&
+      !memoryInfo.includes('free')
+    ) {
+      continue
+    }
+
+    let deviceId = line.substring(0, colonIndex).trim()
+    // Strip the alpha backend prefix when followed by a numeric suffix so id stays consistent
+    // with the prior Vulkan-only behavior (`Vulkan0` → `0`, `MTL0` → `0`, `CUDA0` → `0`).
+    // Backends without a numeric suffix (e.g. `BLAS`) keep their id as-is.
+    const numericSuffixMatch = deviceId.match(/(\d+)$/)
+    if (numericSuffixMatch && /^[A-Za-z]+\d+$/.test(deviceId)) {
+      deviceId = numericSuffixMatch[1]
+    }
+
+    const device: ListedLlamaCppDevice = {
+      id: deviceId,
+      name: deviceInfo.substring(0, lastParenIndex).trim(),
+    }
+    const memory = DEVICE_MEMORY_PATTERN.exec(memoryInfo)
+    if (memory) {
+      device.totalBytes = Number(memory[1]) * 1024 ** 2
+      device.freeBytes = Number(memory[2]) * 1024 ** 2
+    }
+    devices.push(device)
+  }
+  return devices
+}
+
 const platformExtension = process.platform === 'win32' ? 'zip' : 'tar.gz'
 
 // How much of a model server's console output is kept for the error message it
@@ -361,6 +429,7 @@ export class LlamaCppBackendService implements ApiService {
   readonly llamaCppSsdOffloadConfigPath: string
   readonly llamaCppSsdOffloadEmbeddingConfigPath: string
   devices: InferenceDevice[] = [{ id: '0', name: 'Auto select device', selected: true }]
+  private listedDevices: ListedLlamaCppDevice[] = []
 
   // Health endpoint
   healthEndpointUrl: string
@@ -656,6 +725,11 @@ export class LlamaCppBackendService implements ApiService {
     return null
   }
 
+  /** The devices `--list-devices` printed, under this service's ids, with their memory then. */
+  listedLlamaCppDevices(): ListedLlamaCppDevice[] {
+    return this.listedDevices
+  }
+
   async selectDevice(deviceId: string): Promise<void> {
     if (!this.devices.find((d) => d.id === deviceId)) return
     this.devices = this.devices.map((d) => ({ ...d, selected: d.id === deviceId }))
@@ -721,6 +795,7 @@ export class LlamaCppBackendService implements ApiService {
       // Check if llama-server.exe exists
       if (!filesystem.existsSync(this.getActiveLlamaCppExePath())) {
         this.appLogger.warn('llama-server.exe not found, using default device', this.name)
+        this.listedDevices = []
         this.devices = withSelectedDevice(
           withCpuDevice([]).map((d) => ({ ...d, selected: false })),
           this.settings.lastSelectedDevicePerBackend[this.name],
@@ -742,53 +817,9 @@ export class LlamaCppBackendService implements ApiService {
         },
       )
 
-      const availableDevices: Array<{ id: string; name: string }> = []
-      // Phison's llama-server fork (and recent upstream builds) write "Available devices:" + entries
-      // to stderr, not stdout. Parse both streams so detection is robust across build flavors.
-      // Device entries always end with a memory tuple like `(<N> MiB, <N> MiB free)` — log lines
-      // emitted on stderr after the header (`build:`, `load_backend:`, etc.) don't, so use that
-      // as the device-row discriminator. Works across Vulkan / CUDA / SYCL / HIP / MTL / BLAS / etc.
-      const lines = `${stdout}\n${stderr}`
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line !== '')
-
-      let foundDevicesSection = false
-      for (const line of lines) {
-        if (line.startsWith('Available devices:')) {
-          foundDevicesSection = true
-          continue
-        }
-
-        if (foundDevicesSection && line.includes(':')) {
-          const colonIndex = line.indexOf(':')
-          if (colonIndex <= 0) continue
-
-          const deviceInfo = line.substring(colonIndex + 1).trim()
-          const lastParenIndex = deviceInfo.lastIndexOf('(')
-          if (lastParenIndex <= 0) continue
-          const memoryInfo = deviceInfo.substring(lastParenIndex)
-          if (
-            !memoryInfo.includes('MiB') &&
-            !memoryInfo.includes('GiB') &&
-            !memoryInfo.includes('free')
-          ) {
-            continue
-          }
-
-          let deviceId = line.substring(0, colonIndex).trim()
-          // Strip the alpha backend prefix when followed by a numeric suffix so id stays consistent
-          // with the prior Vulkan-only behavior (`Vulkan0` → `0`, `MTL0` → `0`, `CUDA0` → `0`).
-          // Backends without a numeric suffix (e.g. `BLAS`) keep their id as-is.
-          const numericSuffixMatch = deviceId.match(/(\d+)$/)
-          if (numericSuffixMatch && /^[A-Za-z]+\d+$/.test(deviceId)) {
-            deviceId = numericSuffixMatch[1]
-          }
-
-          const deviceName = deviceInfo.substring(0, lastParenIndex).trim()
-          availableDevices.push({ id: deviceId, name: deviceName })
-        }
-      }
+      const listed = parseLlamaCppDeviceList(`${stdout}\n${stderr}`)
+      this.listedDevices = listed
+      const availableDevices = listed.map(({ id, name }) => ({ id, name }))
 
       const deviceChoices = withCpuDevice(availableDevices)
       this.appLogger.info(`detected devices: ${JSON.stringify(deviceChoices, null, 2)}`, this.name)
@@ -816,6 +847,7 @@ export class LlamaCppBackendService implements ApiService {
       )
     } catch (error) {
       this.appLogger.error(`Failed to detect devices: ${error}`, this.name)
+      this.listedDevices = []
       this.devices = withSelectedDevice(
         withCpuDevice([]).map((d) => ({ ...d, selected: false })),
         this.settings.lastSelectedDevicePerBackend[this.name],

@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { UIMessage, UIMessageChunk } from 'ai'
 import { appLoggerInstance } from '../observability/logger'
+import type { GuardModelSize, GuardPlacement, GuardPlan } from './guardPlacement'
 
 // ── Kids-safe text guard ──────────────────────────────────────────────────────
 //
@@ -9,7 +10,8 @@ import { appLoggerInstance } from '../observability/logger'
 // (multilingual, Polish included) on its own llama-server before it reaches a
 // model or the screen. Anything but a clean "Safe" verdict blocks, including a
 // guard that is missing, failed to start or answered garbage: the filter fails
-// closed.
+// closed. Where the guard runs comes from the placement plan; a placement that
+// cannot start or answer hands over to the next one in the plan.
 
 const appLogger = appLoggerInstance
 
@@ -17,6 +19,25 @@ export const KIDS_GUARD_MODEL_REPO =
   'mradermacher/Qwen3Guard-Gen-4B-GGUF/Qwen3Guard-Gen-4B.Q4_K_M.gguf'
 export const KIDS_GUARD_MODEL_DIR = 'mradermacher---Qwen3Guard-Gen-4B-GGUF'
 export const KIDS_GUARD_MODEL_FILE = 'Qwen3Guard-Gen-4B.Q4_K_M.gguf'
+
+export const KIDS_GUARD_SMALL_MODEL_REPO =
+  'QuantFactory/Qwen3Guard-Gen-0.6B-GGUF/Qwen3Guard-Gen-0.6B.Q8_0.gguf'
+export const KIDS_GUARD_SMALL_MODEL_DIR = 'QuantFactory---Qwen3Guard-Gen-0.6B-GGUF'
+export const KIDS_GUARD_SMALL_MODEL_FILE = 'Qwen3Guard-Gen-0.6B.Q8_0.gguf'
+
+/** When false, 0.6B placements are never planned and the 0.6B model is never downloaded. */
+export const KIDS_GUARD_ALLOW_SMALL_FALLBACK = true
+
+const GUARD_MODELS: Record<GuardModelSize, { repo: string; dir: string; file: string }> = {
+  '4B': { repo: KIDS_GUARD_MODEL_REPO, dir: KIDS_GUARD_MODEL_DIR, file: KIDS_GUARD_MODEL_FILE },
+  '0.6B': {
+    repo: KIDS_GUARD_SMALL_MODEL_REPO,
+    dir: KIDS_GUARD_SMALL_MODEL_DIR,
+    file: KIDS_GUARD_SMALL_MODEL_FILE,
+  },
+}
+// A placement that failed this many times in a row is skipped for the rest of the session.
+const PLACEMENT_FAILURE_LIMIT = 2
 
 export const KIDS_BLOCKED_MESSAGE =
   'Nie mogę w tym pomóc. Zapytaj o coś innego.\n\n' +
@@ -125,20 +146,34 @@ export type KidsGuardVerdict = {
 export type KidsGuardDeps = {
   /** Directory GGUF LLMs are downloaded into (PathsManager `ggufLLM`). */
   ggufModelDir(): string
-  /** Starts (or reuses) the guard llama-server for `modelPath`; resolves to its base URL. */
-  ensureGuardServer(modelPath: string): Promise<string>
   /** The shared download-consent flow; rejects when declined or failed. */
   requestModelConsent(models: unknown[]): Promise<void>
+  /** Where the guard may run right now, best placement first. */
+  planGuard(): Promise<GuardPlan>
+  /** Starts (or reuses) the guard llama-server for `modelPath` on `placement`; resolves to its base URL. */
+  ensureGuardServer(modelPath: string, placement: GuardPlacement): Promise<string>
+  /** Whether an image run holds the GPU window. */
+  mediaWindowActive(): boolean
+  /** Resolves once the GPU window is back on chat. */
+  awaitChatWindow(signal?: AbortSignal): Promise<void>
 }
 
 type GuardMessage = { role: 'user' | 'assistant'; content: string }
 
 let guardDeps: KidsGuardDeps | null = null
-let modelReady: Promise<string> | null = null
+let modelsReady: Promise<void> | null = null
+let checksActive = 0
+const placementFailures = new Map<string, number>()
 
 export function setKidsGuardDeps(deps: KidsGuardDeps | null): void {
   guardDeps = deps
-  modelReady = null
+  modelsReady = null
+  placementFailures.clear()
+}
+
+/** Guard checks in flight; a media window waits for them before taking the GPU. */
+export function kidsGuardChecksActive(): number {
+  return checksActive
 }
 
 export function isBlocked(verdict: KidsGuardVerdict): boolean {
@@ -176,23 +211,34 @@ export function lastUserText(messages: unknown[]): string {
     .join('\n')
 }
 
-function guardModelPath(deps: KidsGuardDeps): string {
-  return path.join(deps.ggufModelDir(), KIDS_GUARD_MODEL_DIR, KIDS_GUARD_MODEL_FILE)
+function guardModelPath(deps: KidsGuardDeps, model: GuardModelSize): string {
+  const { dir, file } = GUARD_MODELS[model]
+  return path.join(deps.ggufModelDir(), dir, file)
 }
 
-async function ensureGuardModel(deps: KidsGuardDeps): Promise<string> {
-  const modelPath = guardModelPath(deps)
-  if (fs.existsSync(modelPath)) return modelPath
-  await deps.requestModelConsent([
-    {
-      repo_id: KIDS_GUARD_MODEL_REPO,
-      type: 'ggufLLM',
-      backend: 'llama_cpp',
-      model_path: deps.ggufModelDir(),
-    },
-  ])
-  if (!fs.existsSync(modelPath)) throw new Error(`Safety model not found at ${modelPath}`)
-  return modelPath
+function wantedGuardModels(): GuardModelSize[] {
+  return KIDS_GUARD_ALLOW_SMALL_FALLBACK ? ['4B', '0.6B'] : ['4B']
+}
+
+/** Asks once for every missing guard model, so a fallback never downloads mid-session. */
+async function ensureGuardModels(deps: KidsGuardDeps): Promise<void> {
+  const onDisk = (model: GuardModelSize) => fs.existsSync(guardModelPath(deps, model))
+  const missing = wantedGuardModels().filter((model) => !onDisk(model))
+  if (missing.length > 0) {
+    await deps
+      .requestModelConsent(
+        missing.map((model) => ({
+          repo_id: GUARD_MODELS[model].repo,
+          type: 'ggufLLM',
+          backend: 'llama_cpp',
+          model_path: deps.ggufModelDir(),
+        })),
+      )
+      .catch((error) => appLogger.warn(`Safety model download: ${String(error)}`, 'kids-guard'))
+  }
+  if (!wantedGuardModels().some(onDisk)) {
+    throw new Error(`No safety model found in ${deps.ggufModelDir()}`)
+  }
 }
 
 /** Drops chat-template control tokens and policy markers a child could type to steer the guard. */
@@ -311,30 +357,84 @@ async function classify(
   return parseGuardVerdict(body.content ?? '')
 }
 
+const errorDetail = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+function placementKey(placement: GuardPlacement): string {
+  const { device } = placement
+  return `${placement.model}:${device.kind}:${device.kind === 'gpu' ? device.llamaDeviceId : ''}`
+}
+
+/** The media list while an image run holds the GPU; when it is empty, the chat list after the window. */
+async function guardPlacements(deps: KidsGuardDeps, signal?: AbortSignal) {
+  const plan = await deps.planGuard()
+  if (!deps.mediaWindowActive()) return plan.chat
+  if (plan.media.length > 0) return plan.media
+  await deps.awaitChatWindow(signal)
+  return (await deps.planGuard()).chat
+}
+
+async function judgeOn(
+  baseUrl: string,
+  conversations: GuardMessage[][],
+  signal?: AbortSignal,
+): Promise<KidsGuardVerdict> {
+  for (const messages of conversations) {
+    const verdict = await classify(baseUrl, messages, signal)
+    if (isBlocked(verdict)) return verdict
+  }
+  return { level: 'safe' }
+}
+
+async function judgeWithFallback(
+  deps: KidsGuardDeps,
+  conversations: GuardMessage[][],
+  signal?: AbortSignal,
+): Promise<KidsGuardVerdict> {
+  modelsReady ??= ensureGuardModels(deps).catch((error) => {
+    modelsReady = null
+    throw error
+  })
+  await modelsReady
+  let lastError: unknown = new Error('No guard placement can run')
+  for (const placement of await guardPlacements(deps, signal)) {
+    const key = placementKey(placement)
+    const modelPath = guardModelPath(deps, placement.model)
+    if (!fs.existsSync(modelPath)) continue
+    if ((placementFailures.get(key) ?? 0) >= PLACEMENT_FAILURE_LIMIT) continue
+    try {
+      const baseUrl = await deps.ensureGuardServer(modelPath, placement)
+      // An unparseable answer comes back as a verdict and blocks; only failures to start or answer fall back.
+      const verdict = await judgeOn(baseUrl, conversations, signal)
+      placementFailures.delete(key)
+      return verdict
+    } catch (error) {
+      if (signal?.aborted) throw error
+      placementFailures.set(key, (placementFailures.get(key) ?? 0) + 1)
+      appLogger.warn(`Kids guard on ${key} failed: ${errorDetail(error)}`, 'kids-guard')
+      lastError = error
+    }
+  }
+  throw lastError
+}
+
 async function judge(
   conversations: GuardMessage[][],
   signal?: AbortSignal,
 ): Promise<KidsGuardVerdict> {
+  checksActive++
   try {
     const deps = guardDeps
     if (!deps) throw new Error('Kids guard is not wired')
-    modelReady ??= ensureGuardModel(deps).catch((error) => {
-      modelReady = null
-      throw error
-    })
-    const baseUrl = await deps.ensureGuardServer(await modelReady)
-    for (const messages of conversations) {
-      const verdict = await classify(baseUrl, messages, signal)
-      if (isBlocked(verdict)) {
-        appLogger.info(`Kids guard blocked text (${verdict.level})`, 'kids-guard')
-        return verdict
-      }
-    }
-    return { level: 'safe' }
+    const verdict = await judgeWithFallback(deps, conversations, signal)
+    if (isBlocked(verdict))
+      appLogger.info(`Kids guard blocked text (${verdict.level})`, 'kids-guard')
+    return verdict
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error)
+    const detail = errorDetail(error)
     appLogger.warn(`Kids guard unavailable, blocking: ${detail}`, 'kids-guard')
     return { level: 'unavailable', detail }
+  } finally {
+    checksActive--
   }
 }
 

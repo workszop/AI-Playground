@@ -201,11 +201,11 @@ cd C:\src\AI-Playground\WebUI
 npx vitest run electron/test/safety electron/test/adapters/backends/guardServerArgs.test.ts electron/test/adapters/backends/guardServerLifecycle.test.ts electron/test/adapters/backends/llamaCppDeviceList.test.ts electron/test/kernel/orchestrator.test.ts electron/test/artifact/runner.test.ts electron/test/artifact/runArtifact.test.ts electron/test/chat/turnEngine.test.ts
 ```
 
-Expected result (as of commit `fe8a5df`):
+Expected result (as of the commit that added the image filter check):
 
 ```
- Test Files  11 passed (11)
-      Tests  225 passed (225)
+ Test Files  12 passed (12)
+      Tests  299 passed (299)
 ```
 
 What they cover:
@@ -216,8 +216,9 @@ What they cover:
 | `electron/test/safety/guardPlacement.test.ts` | Choosing where the safety model runs (CPU, integrated GPU, discrete GPU) from the hardware and free memory |
 | `electron/test/safety/guardFacts.test.ts` | Reading hardware and memory facts, including the Windows shared-GPU-memory limit |
 | `electron/test/safety/cpuTopology.test.ts` | Choosing the number of CPU threads |
+| `electron/test/safety/imageFilter.test.ts` | Every shipped image preset (with each variant applied) sends its saved images through a `SafetyChecker` with threshold 0.4 or lower; changed thresholds and bypassed filters are refused; changed `SafetyChecker` node files are restored |
 | `electron/test/adapters/backends/guardServerArgs.test.ts`, `guardServerLifecycle.test.ts`, `llamaCppDeviceList.test.ts` | Starting, restarting and stopping the safety model's server, and reading the list of GPUs |
-| `electron/test/kernel/orchestrator.test.ts`, `electron/test/artifact/runner.test.ts`, `electron/test/artifact/runArtifact.test.ts` | Image prompts are checked before image generation starts; unchecked prompts are refused; blocked prompts show the blocked message; locked filter settings ignore saved values |
+| `electron/test/kernel/orchestrator.test.ts`, `electron/test/artifact/runner.test.ts`, `electron/test/artifact/runArtifact.test.ts` | Image prompts are checked before image generation starts; unchecked prompts are refused; blocked prompts show the blocked message; locked filter settings ignore saved values; a run with a changed image filter is refused, an image (still or animated) from outside the filter is not shown, and ComfyUI restarts after its filter files are restored |
 | `electron/test/chat/turnEngine.test.ts` | Chat messages are checked before the model answers; a blocked reply piece is never shown and the reply stops |
 
 ### 4.2 Full test suite
@@ -226,7 +227,7 @@ What they cover:
 npm test
 ```
 
-This runs every test in the app, including the upstream ones. Known results on Linux at commit `fe8a5df`: everything passes except one upstream SQLite test, which fails the same way without the kids-safe changes (a local dependency issue), and `agentModeResume.test.ts`, which sometimes times out when the whole suite runs at once and passes when run alone (`npx vitest run agentModeResume`).
+This runs every test in the app, including the upstream ones. Known results on Linux: everything passes except one upstream SQLite test, which fails the same way without the kids-safe changes (a local dependency issue), and `agentModeResume.test.ts`, which sometimes times out when the whole suite runs at once and passes when run alone (`npx vitest run agentModeResume`).
 
 The full suite has not been run on Windows yet. If a test fails there, check whether it is one of the files in 4.1. A failure in 4.1 is a kids-safe problem and should be reported. A failure elsewhere is probably an upstream Windows issue: compare with a clone of [intel/AI-Playground](https://github.com/intel/AI-Playground).
 
@@ -324,6 +325,7 @@ Settings > Apps > Installed apps > AI Playground > Uninstall, from the parent's 
 | The Set Up wizard fails | Restart the app and try again (timeouts often clear on retry). Turn off company VPNs. Temporarily disable third-party antivirus. Install the Visual C++ Redistributable (3.1) |
 | Every message says "Filtr bezpieczeństwa nie działa... / The safety filter is not available..." | The safety model could not start. Check that the **Llama.cpp** backend is installed (in the app's backend settings), that the safety models finished downloading, and that the PC has enough free memory. Restart the app. If it continues, send the log |
 | Every generated image is black | Some false blocks are expected (about 1 in 5 harmless images of children, mermaids or ballerinas, see [KIDS-SAFE.md](KIDS-SAFE.md)). If **every** image is black, send the log |
+| An image preset always says "Filtr obrazów jest wyłączony albo zmieniony... / The image safety filter is missing or changed..." | The preset's files were changed, or it is a preset the kids-safe build does not allow (Acer VisionArt). Restore the shipped files (see [restoring the shipped presets](#restoring-the-shipped-presets)). If it happens with a shipped preset right after installing, send the log (lines with `Image filter check failed`) |
 | Chat is slow | Normal: the reply is checked piece by piece. On a laptop with an integrated GPU, a long answer takes about a minute or more. Close other heavy programs |
 | The child's account downloads everything again | The app was installed "Only for me", or with sharing turned off. Reinstall from the parent's account for **all users** with sharing on |
 
@@ -343,12 +345,24 @@ Paste the path into the File Explorer address bar to open it. Lines from the fil
 
 The text filter (chat and image prompts) is part of the program in `C:\Program Files\AI Playground`, which a standard account cannot change.
 
-The **image filter is different**. Its settings live in the image presets and the ComfyUI node files, and the app copies those to a folder that each user can write to: the shared folder (`C:\Users\Public\AI Playground`) or the user's own `%LOCALAPPDATA%\ai-playground`. A child who finds those files and knows what to edit could weaken or remove the image filter without administrator rights. The text check of image prompts would still apply.
+The **image filter** settings live in the image presets and the ComfyUI node files, and the app copies those to a folder that each user can write to: the shared folder (`C:\Users\Public\AI Playground`) or the user's own `%LOCALAPPDATA%\ai-playground`. The app checks them before every image run, with code that sits in the protected program folder:
 
-So:
+- If a preset no longer sends every saved image through the filter, or raises its threshold above 0.4, the run is refused with "Filtr obrazów jest wyłączony albo zmieniony... / The image safety filter is missing or changed...".
+- An image that arrives from anywhere other than the filter is not shown.
+- If the filter's code file was changed, the app puts the original back and restarts the image backend before generating.
+
+So editing a preset or the filter file does not turn the filter off. Someone who can program in Python could still change the image backend itself or the detector model in that folder. So:
 
 - Keep an eye on what the child does, especially with older or tech-savvy children.
 - Use parental controls in Windows in addition to the app.
-- If images suddenly stop being black when they should be (check 8 in section 5), reinstall the app.
+- If images suddenly stop being black when they should be (check 8 in section 5), [restore the shipped presets](#restoring-the-shipped-presets) and send the log.
+
+### Restoring the shipped presets
+
+The app copies its presets into the writable folder only when its version changes, so reinstalling the same version does not undo edits there. To make it copy them again:
+
+1. Close AI Playground.
+2. Delete the file `.aipg-seed-version` from the resources folder: `C:\Users\Public\AI Playground\resources` for a shared install, `%LOCALAPPDATA%\ai-playground\resources` in the child's account otherwise.
+3. Start the app. It copies the shipped presets and node files over the old ones. Downloaded models are kept.
 
 Other limits (video and speech are not filtered, no filter is perfect) are in [KIDS-SAFE.md](KIDS-SAFE.md).

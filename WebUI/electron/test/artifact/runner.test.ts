@@ -62,6 +62,7 @@ import {
   submitArtifactRun,
 } from '../../kernel/orchestrator'
 import { blockedMessageFor, checkKidsPrompt } from '../../safety/kidsGuard'
+import { IMAGE_FILTER_MISSING_MESSAGE } from '../../safety/imageFilter'
 import {
   resetKernelBusForTest,
   setKernelEventWindow,
@@ -95,6 +96,7 @@ let kernelEvents: ({ type: string } & Record<string, unknown>)[] = []
 let serviceStatus: string
 let statusListeners: ((status: string) => void)[]
 let consentRequests: number
+let serviceStops: number
 let consentApproved: boolean
 let missingModels: ArtifactMissingModel[]
 const setPresetParameters = vi.fn(async (_parameters: string[]) => {})
@@ -111,6 +113,7 @@ function deps(overrides: Partial<Parameters<typeof setArtifactRunnerDeps>[0]> = 
           return 'running'
         }),
         stop: vi.fn(async () => {
+          serviceStops++
           serviceStatus = 'stopped'
           return 'stopped'
         }),
@@ -137,6 +140,7 @@ function deps(overrides: Partial<Parameters<typeof setArtifactRunnerDeps>[0]> = 
     devPresetsEnabled: () => false,
     promptChecked: (_runId: string) => true,
     forgetPromptCheck: vi.fn((_runId: string) => {}),
+    restoreImageFilterNode: vi.fn(async () => false),
     ...overrides,
   }
 }
@@ -165,6 +169,16 @@ function preset(): ComfyUiPreset {
         class_type: 'KSampler',
         inputs: { seed: 0, steps: 4, cfg: 1, sampler_name: 'euler' },
         _meta: { title: 'KSampler' },
+      },
+      '3': {
+        class_type: 'SafetyChecker',
+        inputs: { image: ['2', 0], threshold: 0.4 },
+        _meta: { title: 'Intercept NSFW Outputs' },
+      },
+      '4': {
+        class_type: 'SaveImage',
+        inputs: { filename_prefix: 'AIPG_Image', images: ['3', 0] },
+        _meta: { title: 'Save Image' },
       },
     },
   } as unknown as ComfyUiPreset
@@ -223,6 +237,7 @@ describe('artifact runner', () => {
     serviceStatus = 'running'
     statusListeners = []
     consentRequests = 0
+    serviceStops = 0
     consentApproved = true
     missingModels = []
     socketHandlers = null
@@ -269,14 +284,14 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'out0.png', subfolder: '', type: 'output' }] },
       },
     })
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'out1.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -319,14 +334,14 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] },
       },
     })
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'b.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -350,14 +365,14 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] },
       },
     })
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'b.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -369,14 +384,14 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'c.png', subfolder: '', type: 'output' }] },
       },
     })
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'd.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -410,7 +425,7 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -445,7 +460,7 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -454,7 +469,7 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'b.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -484,7 +499,7 @@ describe('artifact runner', () => {
     firstHandlers.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -498,7 +513,7 @@ describe('artifact runner', () => {
     firstHandlers.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'stray.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -507,7 +522,7 @@ describe('artifact runner', () => {
     secondHandlers.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'b.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -537,7 +552,7 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] },
       },
     })
@@ -614,6 +629,62 @@ describe('artifact runner', () => {
     expect(runnerDeps.forgetPromptCheck).toHaveBeenCalledWith('run-1')
   })
 
+  it('refuses a workflow whose image filter threshold was raised', async () => {
+    setArtifactRunnerDeps(deps())
+    const raised = preset()
+    ;(raised.comfyUiApiWorkflow['3'] as { inputs: Record<string, unknown> }).inputs.threshold = 0.9
+    const result = await submitArtifactRun(payload({ preset: raised }))
+    expect(result.state).toBe('failed')
+    expect(result.error).toBe(IMAGE_FILTER_MISSING_MESSAGE)
+    expect(submittedPrompts).toHaveLength(0)
+  })
+
+  it('fails the run when a still image comes from a node outside the image filter', async () => {
+    setArtifactRunnerDeps(deps())
+    const run = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(2))
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '2',
+        output: { images: [{ filename: 'raw.png', subfolder: '', type: 'output' }] },
+      },
+    })
+    const result = await run
+    expect(result.state).toBe('failed')
+    expect(result.error).toBe(IMAGE_FILTER_MISSING_MESSAGE)
+    expect(result.items).toHaveLength(0)
+  })
+
+  it('does not let an image preset return an unfiltered animated image', async () => {
+    setArtifactRunnerDeps(deps())
+    const run = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(2))
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '2',
+        output: {
+          images: [{ filename: 'raw.webp', subfolder: '', type: 'output' }],
+          animated: [true],
+        },
+      },
+    })
+    const result = await run
+    expect(result.state).toBe('failed')
+    expect(result.error).toBe(IMAGE_FILTER_MISSING_MESSAGE)
+  })
+
+  it('restarts a running ComfyUI after restoring changed SafetyChecker files', async () => {
+    setArtifactRunnerDeps(deps({ restoreImageFilterNode: vi.fn(async () => true) }))
+    const run = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(2))
+    expect(serviceStops).toBe(1)
+    expect(serviceStatus).toBe('running')
+    cancelActiveArtifactRun()
+    await run
+  })
+
   it('runs a prompt the orchestrator checked and forgets it once settled', async () => {
     setOrchestratorDeps({
       stopChatForMedia: async () => {},
@@ -634,7 +705,7 @@ describe('artifact runner', () => {
     socketHandlers!.onJson({
       type: 'executed',
       data: {
-        node: '2',
+        node: '4',
         output: { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] },
       },
     })

@@ -250,7 +250,7 @@
             "inputs": {
               "op": "Sub",
               "a": 1,
-              "b": 0.5
+              "b": 0.6
             },
             "class_type": "CM_FloatBinaryOperation",
             "_meta": {
@@ -528,7 +528,7 @@
             "inputs": {
               "op": "Sub",
               "a": 1,
-              "b": 0.5
+              "b": 0.6
             },
             "class_type": "CM_FloatBinaryOperation",
             "_meta": {

@@ -71,6 +71,7 @@ import {
 import { collectGuardFacts, memoizeUntilRejected } from './safety/guardFacts'
 import { planGuardPlacements } from './safety/guardPlacement'
 import { readCpuTopology } from './safety/cpuTopology'
+import { restoreSafetyCheckerNode } from './safety/imageFilter'
 import { filterPartnerPresets, updateIntelPresets } from './adapters/updateIntelPresets.ts'
 import {
   invalidatePresetCatalog,
@@ -1487,6 +1488,10 @@ function wireArtifactRunner(settings: LocalSettings): void {
     devPresetsEnabled: () => !app.isPackaged || settings.showDebugSettingsInUI,
     promptChecked: artifactPromptChecked,
     forgetPromptCheck: forgetArtifactPromptCheck,
+    restoreImageFilterNode: async () => {
+      const service = comfyService()
+      return service ? restoreSafetyCheckerNode(service.serviceDir) : false
+    },
   })
 
   // The orchestrator owns GPU policy (step 7): every run — panel, chat tool,

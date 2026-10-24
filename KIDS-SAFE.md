@@ -10,8 +10,11 @@ This fork of [intel/AI-Playground](https://github.com/intel/AI-Playground) adds 
 | Chat reply | Shown in pieces, each judged by Qwen3Guard (with the question and the end of the text already shown) before it appears. A blocked piece is never shown: the reply stops and the blocked message is added. Reasoning ("thinking") text is never shown |
 | Image prompt (image panel and chat image tool) | Same prompt check, before ComfyUI starts |
 | Generated image | `SafetyChecker` node (vit-base-nsfw-detector) on every image in the batch, threshold locked at 0.4 (strength 0.6). Includes the OpenVINO variants, Colorize, Change Face and Upscale |
+| Image filter integrity | Before each image run the app checks the workflow it is about to send: every saved image must come straight from a `SafetyChecker` with a threshold of 0.4 or lower, otherwise the run is refused. An image from any other node is never shown (animated output is allowed only for video presets, which are not filtered). The `SafetyChecker` node files are compared with the copy built into the app and restored (with a ComfyUI restart) if they were changed |
 | Live previews | Never shown (they are unfiltered intermediate frames) |
 | Agent mode (Agent, Game Agent, Quick Coder) | Turned off: those turns stream outside the chat guard |
+
+The integrity check refuses two kinds of preset that save images without a `SafetyChecker` in front: the Acer VisionArt partner preset (it saves through Acer's own node) and the dev-only "Dummy Image" and "Dummy Edit" presets.
 
 Blocked requests get the reply "Nie mogę w tym pomóc. Zapytaj o coś innego. / I can't help with that. Try asking about something else." Both "Unsafe" and "Controversial" verdicts block.
 
@@ -45,10 +48,11 @@ The guard picks its placement from the hardware and tries the options in order. 
 - `WebUI/electron/adapters/backends/llamaCppBackendService.ts` – `ensureGuardServer` (ignores user startup parameters).
 - `WebUI/electron/chat/turnEngine.ts` (chat prompts and replies), `WebUI/electron/kernel/orchestrator.ts` (image prompts) – where text is checked.
 - `comfyui-deps/custom_nodes/SafetyChecker/nodes.py` and `modes/base/` presets – image output filter.
+- `WebUI/electron/safety/imageFilter.ts` and `WebUI/electron/artifact/runner.ts` – image filter integrity check.
 
 ## Limits
 
-No filter is perfect. On a 50-prompt Polish test set the 4B guard plus the word list missed 0 of 30 harmful prompts and blocked 1 of 20 harmless ones (a family in swimsuits at the pool); the set is small, so treat that as indicative. Short Polish slang is the weakest area, which is what the word list is for. The image threshold of 0.4 was chosen on a 136-image test (no explicit images): it blocked all 11 swimwear, lingerie and reclining-nude images, but also about 1 in 5 harmless images generated from kid prompts (the SD1.5 model tends to draw "girl", "mermaid" or "ballerina" as glamorous adults) and 5 of 64 harmless photos; a blocked image comes back black. Video presets and text-to-speech are not filtered. Use this together with a separate non-admin account for the child and OS parental controls. A child with admin rights can change the app itself. Even without admin rights, the image presets and the ComfyUI node files are copied to a folder each user can write to, so a determined child could weaken the image filter; the text filter is part of the program files and stays protected in an all-users install.
+No filter is perfect. On a 50-prompt Polish test set the 4B guard plus the word list missed 0 of 30 harmful prompts and blocked 1 of 20 harmless ones (a family in swimsuits at the pool); the set is small, so treat that as indicative. Short Polish slang is the weakest area, which is what the word list is for. The image threshold of 0.4 was chosen on a 136-image test (no explicit images): it blocked all 11 swimwear, lingerie and reclining-nude images, but also about 1 in 5 harmless images generated from kid prompts (the SD1.5 model tends to draw "girl", "mermaid" or "ballerina" as glamorous adults) and 5 of 64 harmless photos; a blocked image comes back black. Video presets and text-to-speech are not filtered. Use this together with a separate non-admin account for the child and OS parental controls. A child with admin rights can change the app itself. The image presets and the ComfyUI node files are copied to a folder each user can write to; edits that remove or weaken the image filter are caught by the integrity check above, but someone who can write Python could still change ComfyUI itself or the detector model there. The text filter and the integrity check are part of the program files and stay protected in an all-users install.
 
 ## Installing on Windows
 

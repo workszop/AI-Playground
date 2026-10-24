@@ -66,6 +66,11 @@ import { buildDummyGlb, DUMMY_3D_PRESET_NAME, VIEW_FIXTURE } from '@/lib/devPres
 import { saveMediaItems } from '../persist/mediaItemFiles'
 import { extractMessage } from '@/assets/js/errors/appError'
 import { blockedMessageFor } from '../safety/kidsGuard'
+import {
+  checkedImageOutputs,
+  IMAGE_FILTER_MISSING_MESSAGE,
+  imageFilterProblem,
+} from '../safety/imageFilter'
 
 const appLogger = appLoggerInstance
 
@@ -171,6 +176,8 @@ export type ArtifactRunnerDeps = {
   promptChecked(runId: string): boolean
   /** Drops the run's checked mark once it has settled. */
   forgetPromptCheck(runId: string): void
+  /** Rewrites changed SafetyChecker node files; true when ComfyUI must restart to load them. */
+  restoreImageFilterNode(): Promise<boolean>
 }
 
 type ActiveRun = {
@@ -188,6 +195,8 @@ type ActiveRun = {
   /** ComfyUI client id for this run — unique so leftover WS frames cannot mix. */
   clientId: string
   comfyBaseUrl: string | null
+  /** Output nodes whose still images passed the kids-safe image filter. */
+  checkedOutputs: Set<string>
 }
 
 let activeRun: ActiveRun | null = null
@@ -446,6 +455,7 @@ function startRun(payload: ArtifactRunPayload): Promise<ArtifactRunResult> {
     phase: 'queued',
     clientId: `aipg-artifact-${payload.runId}`,
     comfyBaseUrl: null,
+    checkedOutputs: new Set(),
   }
   activeRun = run
 
@@ -667,14 +677,24 @@ function handleWebsocketMessage(run: ActiveRun, msg: unknown): void {
               (i) => i.type === 'output',
             )
           : undefined
+      const animated =
+        image !== undefined &&
+        'animated' in output &&
+        Array.isArray(output.animated) &&
+        output.animated[output.images.indexOf(image)]
+      // Kids-safe build: an image is shown only when it came out of the image filter. Video
+      // presets are not filtered yet (KIDS-SAFE.md), so only they may return animated images.
+      const exempt = animated && run.payload.preset.mediaType === 'video'
+      if (image && !exempt && !run.checkedOutputs.has(String(parsed.data.node))) {
+        appLogger.warn(`Unfiltered image from node ${String(parsed.data.node)}`, 'kids-guard')
+        failRun(run, IMAGE_FILTER_MISSING_MESSAGE, true)
+        break
+      }
       let patch: Partial<MediaItem> | null = null
       if (image) {
-        patch =
-          'animated' in output &&
-          Array.isArray(output.animated) &&
-          output.animated[output.images.indexOf(image)]
-            ? { type: 'video', videoUrl: relative(image.subfolder, image.filename) }
-            : { type: 'image', imageUrl: relative(image.subfolder, image.filename) }
+        patch = animated
+          ? { type: 'video', videoUrl: relative(image.subfolder, image.filename) }
+          : { type: 'image', imageUrl: relative(image.subfolder, image.filename) }
       } else if (video) {
         patch = {
           type: 'video',
@@ -753,6 +773,12 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
   await comfyService.setPresetParameters(run.payload.preset.requiredComfyUiParameters ?? [])
   await installMissingRequirements(run, run.payload.preset, comfyService)
   if (run.settled) return
+  // The node files live in a user-writable folder; ComfyUI must not keep a changed copy loaded.
+  if ((await deps.restoreImageFilterNode()) && comfyService.currentStatus === 'running') {
+    appLogger.warn('SafetyChecker node files were changed; restarting ComfyUI', 'kids-guard')
+    await comfyService.stop()
+  }
+  if (run.settled) return
 
   const baseUrl = await startBackendAndWait(run)
   if (run.settled) return
@@ -805,6 +831,14 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
       uploadInputFile: (file) => uploadInputFile(baseUrl, clientDeps(), file),
     },
   )
+  // Presets live in a user-writable folder, so the filter is checked in what is actually sent.
+  const filterProblem = imageFilterProblem(workflow, run.payload.preset.mediaType)
+  if (filterProblem) {
+    appLogger.warn(`Image filter check failed: ${filterProblem}`, 'kids-guard')
+    failRun(run, IMAGE_FILTER_MISSING_MESSAGE, false)
+    return
+  }
+  run.checkedOutputs = checkedImageOutputs(workflow)
   run.loaderNodes = [
     ...findKeysByClassType(workflow, 'CheckpointLoaderSimple'),
     ...findKeysByClassType(workflow, 'Unet Loader (GGUF)'),

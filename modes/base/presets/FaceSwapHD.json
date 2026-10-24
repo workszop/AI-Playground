@@ -129,10 +129,10 @@
       "label": "Safety Check",
       "nodeTitle": "SafetyCheckerStrength",
       "nodeInput": "b",
-      "min": 0.9,
-      "max": 0.9,
+      "min": 0.6,
+      "max": 0.6,
       "step": 0.05,
-      "defaultValue": 0.9,
+      "defaultValue": 0.6,
       "displayed": false,
       "modifiable": false
     },

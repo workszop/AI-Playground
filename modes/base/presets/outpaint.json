@@ -887,7 +887,7 @@
           },
           "9001": {
             "inputs": {
-              "threshold": 0.1,
+              "threshold": 0.4,
               "image": ["50", 0]
             },
             "class_type": "SafetyChecker",
@@ -1247,7 +1247,7 @@
           },
           "9001": {
             "inputs": {
-              "threshold": 0.1,
+              "threshold": 0.4,
               "image": ["50", 0]
             },
             "class_type": "SafetyChecker",
@@ -1345,10 +1345,10 @@
       "label": "Safety Check",
       "nodeTitle": "SafetyCheckerStrength",
       "nodeInput": "b",
-      "min": 0.9,
-      "max": 0.9,
+      "min": 0.6,
+      "max": 0.6,
       "step": 0.05,
-      "defaultValue": 0.9,
+      "defaultValue": 0.6,
       "displayed": false,
       "modifiable": false
     },

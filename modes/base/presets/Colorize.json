@@ -86,7 +86,7 @@
     },
     "9001": {
       "inputs": {
-        "threshold": 0.1,
+        "threshold": 0.4,
         "image": ["6", 0]
       },
       "class_type": "SafetyChecker",

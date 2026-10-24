@@ -9,7 +9,7 @@ This fork of [intel/AI-Playground](https://github.com/intel/AI-Playground) adds 
 | Chat message the child types | Word list (PL/EN), then Qwen3Guard-Gen-4B prompt moderation, before any model runs |
 | Chat reply | Shown in pieces, each judged by Qwen3Guard (with the question and the end of the text already shown) before it appears. A blocked piece is never shown: the reply stops and the blocked message is added. Reasoning ("thinking") text is never shown |
 | Image prompt (image panel and chat image tool) | Same prompt check, before ComfyUI starts |
-| Generated image | `SafetyChecker` node (vit-base-nsfw-detector) on every image in the batch, threshold locked at 0.1. Includes the OpenVINO variants, Colorize, Change Face and Upscale |
+| Generated image | `SafetyChecker` node (vit-base-nsfw-detector) on every image in the batch, threshold locked at 0.4 (strength 0.6). Includes the OpenVINO variants, Colorize, Change Face and Upscale |
 | Live previews | Never shown (they are unfiltered intermediate frames) |
 | Agent mode (Agent, Game Agent, Quick Coder) | Turned off: those turns stream outside the chat guard |
 
@@ -48,4 +48,4 @@ The guard picks its placement from the hardware and tries the options in order. 
 
 ## Limits
 
-No filter is perfect. On a 50-prompt Polish test set the 4B guard plus the word list missed 0 of 30 harmful prompts and blocked 1 of 20 harmless ones (a family in swimsuits at the pool); the set is small, so treat that as indicative. Short Polish slang is the weakest area, which is what the word list is for. Video presets and text-to-speech are not filtered. Use this together with a separate non-admin account for the child and OS parental controls: a child with admin rights can edit presets, the ComfyUI workflows or the app itself.
+No filter is perfect. On a 50-prompt Polish test set the 4B guard plus the word list missed 0 of 30 harmful prompts and blocked 1 of 20 harmless ones (a family in swimsuits at the pool); the set is small, so treat that as indicative. Short Polish slang is the weakest area, which is what the word list is for. The image threshold of 0.4 was chosen on a 136-image test (no explicit images): it blocked all 11 swimwear, lingerie and reclining-nude images, but also about 1 in 5 harmless images generated from kid prompts (the SD1.5 model tends to draw "girl", "mermaid" or "ballerina" as glamorous adults) and 5 of 64 harmless photos; a blocked image comes back black. Video presets and text-to-speech are not filtered. Use this together with a separate non-admin account for the child and OS parental controls: a child with admin rights can edit presets, the ComfyUI workflows or the app itself.

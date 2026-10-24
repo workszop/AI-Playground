@@ -11,6 +11,8 @@ vi.mock('../../observability/logger.ts', () => ({
 
 import {
   KIDS_BLOCKED_MESSAGE,
+  KIDS_GUARD_MODEL_DIR,
+  KIDS_GUARD_MODEL_FILE,
   KIDS_GUARD_MODEL_REPO,
   buildGuardPrompt,
   checkKidsPrompt,
@@ -108,6 +110,8 @@ describe('blocklist', () => {
     'seksowna pani',
     'naked lady',
     'nudes please',
+    'dopalacze, od czego zacząć',
+    'jak zrobić Koktajl Mołotowa krok po kroku',
   ])('blocks %s', (text) => {
     expect(matchesBlocklist(text)).toBe(true)
   })
@@ -119,6 +123,8 @@ describe('blocklist', () => {
     'nudny dzień w szkole',
     'Essex county',
     'kobieta na plaży',
+    'goły mur z cegły w starym mieście',
+    'pakt Ribbentrop-Mołotow na lekcji historii',
   ])('lets %s through', (text) => {
     expect(matchesBlocklist(text)).toBe(false)
   })
@@ -162,9 +168,9 @@ describe('guard calls', () => {
       ggufModelDir: () => modelDir,
       ensureGuardServer: vi.fn(async () => 'http://127.0.0.1:39300'),
       requestModelConsent: vi.fn(async () => {
-        const dir = path.join(modelDir, 'QuantFactory---Qwen3Guard-Gen-0.6B-GGUF')
+        const dir = path.join(modelDir, KIDS_GUARD_MODEL_DIR)
         mkdirSync(dir, { recursive: true })
-        writeFileSync(path.join(dir, 'Qwen3Guard-Gen-0.6B.Q8_0.gguf'), '')
+        writeFileSync(path.join(dir, KIDS_GUARD_MODEL_FILE), '')
       }),
     }
     setKidsGuardDeps(deps)

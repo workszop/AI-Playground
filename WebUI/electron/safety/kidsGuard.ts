@@ -14,9 +14,9 @@ import { appLoggerInstance } from '../observability/logger'
 const appLogger = appLoggerInstance
 
 export const KIDS_GUARD_MODEL_REPO =
-  'QuantFactory/Qwen3Guard-Gen-0.6B-GGUF/Qwen3Guard-Gen-0.6B.Q8_0.gguf'
-const KIDS_GUARD_MODEL_DIR = 'QuantFactory---Qwen3Guard-Gen-0.6B-GGUF'
-const KIDS_GUARD_MODEL_FILE = 'Qwen3Guard-Gen-0.6B.Q8_0.gguf'
+  'mradermacher/Qwen3Guard-Gen-4B-GGUF/Qwen3Guard-Gen-4B.Q4_K_M.gguf'
+export const KIDS_GUARD_MODEL_DIR = 'mradermacher---Qwen3Guard-Gen-4B-GGUF'
+export const KIDS_GUARD_MODEL_FILE = 'Qwen3Guard-Gen-4B.Q4_K_M.gguf'
 
 export const KIDS_BLOCKED_MESSAGE =
   'Nie mogę w tym pomóc. Zapytaj o coś innego.\n\n' +
@@ -29,9 +29,10 @@ const KIDS_GUARD_UNAVAILABLE_MESSAGE =
   'Filtr bezpieczeństwa nie działa, więc ta prośba została zablokowana.\n\n' +
   'The safety filter is not available, so this request was blocked.'
 
-// Explicit words the 0.6B guard misses in Polish ("naga kobieta", "cycki").
+// Explicit words and Polish slang the guard model misses ("cycki", "dopalacze").
 // Stems match any ending; whole words match only as written.
 const BLOCKED_STEMS = [
+  'dopalacz',
   'porn',
   'erotycz',
   'erotyk',
@@ -66,10 +67,6 @@ const BLOCKED_WORDS = [
   'nago',
   'nagość',
   'nagości',
-  'goła',
-  'goły',
-  'gołe',
-  'gołej',
   'golas',
   'golasy',
   'cycki',
@@ -90,6 +87,12 @@ const BLOCKED_WORDS = [
   'vagina',
   'dick',
   'cunt',
+  'koktajl mołotowa',
+  'koktajle mołotowa',
+  'koktajlu mołotowa',
+  'koktajli mołotowa',
+  'molotov cocktail',
+  'molotov cocktails',
 ]
 const BLOCKLIST_PATTERN = new RegExp(
   `(?<!\\p{L})(?:(?:${BLOCKED_STEMS.join('|')})\\p{L}*|(?:${BLOCKED_WORDS.join('|')})(?!\\p{L}))`,

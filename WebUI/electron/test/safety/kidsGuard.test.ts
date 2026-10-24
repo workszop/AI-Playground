@@ -24,6 +24,7 @@ import {
   matchesBlocklist,
   neutralizeGuardInput,
   parseGuardVerdict,
+  replyPieceReady,
   setKidsGuardDeps,
   type KidsGuardDeps,
 } from '../../safety/kidsGuard'
@@ -134,7 +135,7 @@ describe('helpers', () => {
   it('splits long text into windows that cover all of it', () => {
     const text = 'a'.repeat(9000)
     const windows = guardWindows(text)
-    expect(windows.length).toBe(3)
+    expect(windows.length).toBe(5)
     expect(windows.join('')).toBe(text)
   })
 
@@ -219,7 +220,7 @@ describe('guard calls', () => {
   it('judges every window of a long reply', async () => {
     answer('Safety: Safe')
     await checkKidsResponse('q', 'x'.repeat(8500))
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('fails closed when the server errors, the model is declined or nothing is wired', async () => {
@@ -236,6 +237,14 @@ describe('guard calls', () => {
     expect((await checkKidsPrompt('kot')).level).toBe('unavailable')
   })
 
+  it('pins prompt checks and reply checks to their own cached slot', async () => {
+    answer('Safety: Safe')
+    await checkKidsPrompt('kot w kosmosie')
+    await checkKidsResponse('kot', 'Kot leci w kosmos.')
+    const slots = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).id_slot)
+    expect(slots).toEqual([0, 1])
+  })
+
   it('skips the model for empty text and blocklisted text', async () => {
     expect(await checkKidsPrompt('   ')).toEqual({ level: 'safe' })
     expect((await checkKidsPrompt('naga kobieta')).level).toBe('unsafe')
@@ -243,8 +252,46 @@ describe('guard calls', () => {
   })
 })
 
+describe('replyPieceReady', () => {
+  it('cuts a short first piece at a paragraph, a sentence end or the size cap', () => {
+    expect(replyPieceReady('Krótko.', true)).toBe(false)
+    expect(replyPieceReady(`${'a'.repeat(160)}\n\n`, true)).toBe(true)
+    expect(replyPieceReady(`${'a'.repeat(160)}.`, true)).toBe(false)
+    expect(replyPieceReady(`${'a'.repeat(310)}.`, true)).toBe(true)
+    expect(replyPieceReady('a'.repeat(310), true)).toBe(false)
+    expect(replyPieceReady('a'.repeat(800), true)).toBe(true)
+  })
+
+  it('cuts later pieces larger, so a reply needs fewer checks', () => {
+    expect(replyPieceReady(`${'a'.repeat(310)}.`, false)).toBe(false)
+    expect(replyPieceReady(`${'a'.repeat(810)}\n\n`, false)).toBe(true)
+    expect(replyPieceReady(`${'a'.repeat(1210)}.`, false)).toBe(true)
+    expect(replyPieceReady('a'.repeat(1600), false)).toBe(true)
+  })
+})
+
+/** A source the test feeds chunk by chunk, to see what is shown before the reply ends. */
+function controllableSource() {
+  let controller!: ReadableStreamDefaultController<UIMessageChunk>
+  const cancelled = vi.fn()
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(c) {
+      controller = c
+    },
+    cancel: cancelled,
+  })
+  return {
+    stream,
+    push: (chunk: UIMessageChunk) => controller.enqueue(chunk),
+    controller,
+    cancelled,
+  }
+}
+
+const paragraph = (n: number) => `${'Smok leciał nad górami i lasami. '.repeat(n)}\n\n`
+
 describe('guardUiMessageStream', () => {
-  it('holds a safe reply until judged, then releases it without reasoning', async () => {
+  it('releases a short safe reply without reasoning', async () => {
     const check = vi.fn(async () => ({ level: 'safe' as const }))
     const out = await collect(guardUiMessageStream(streamOf(REPLY), check))
     expect(check).toHaveBeenCalledWith('Dawno temu był smok.')
@@ -255,24 +302,122 @@ describe('guardUiMessageStream', () => {
     ])
   })
 
-  it('replaces a blocked reply with the blocked message', async () => {
+  it('never shows a blocked piece and appends the blocked message', async () => {
     const check = vi.fn(async () => ({ level: 'unsafe' as const }))
-    const out = await collect(guardUiMessageStream(streamOf(REPLY), check))
+    const onBlocked = vi.fn()
+    const out = await collect(guardUiMessageStream(streamOf(REPLY), check, onBlocked))
     expect(out.map((c) => c.type)).toEqual([
       'start',
+      'start-step',
       'text-start',
       'text-delta',
       'text-end',
       'finish',
     ])
+    expect(onBlocked).toHaveBeenCalledTimes(1)
     const message = await assemble(out)
     expect(message?.id).toBe('m1')
-    expect(message?.parts).toEqual([
+    expect(message?.parts.filter((p) => p.type === 'text')).toEqual([
       expect.objectContaining({ type: 'text', text: KIDS_BLOCKED_MESSAGE }),
     ])
   })
 
-  it('passes the start chunk through before the reply is judged', async () => {
+  it('shows checked pieces while the model is still writing', async () => {
+    const check = vi.fn(async () => ({ level: 'safe' as const }))
+    const source = controllableSource()
+    const reader = guardUiMessageStream(source.stream, check).getReader()
+    source.push({ type: 'start', messageId: 'm1' })
+    source.push({ type: 'text-start', id: 't' })
+    source.push({ type: 'text-delta', id: 't', delta: paragraph(6) })
+    const types: string[] = []
+    for (let i = 0; i < 3; i++) types.push((await reader.read()).value!.type)
+    expect(types).toEqual(['start', 'text-start', 'text-delta'])
+    expect(check).toHaveBeenCalledTimes(1)
+    source.push({ type: 'text-delta', id: 't', delta: 'Koniec.' })
+    source.push({ type: 'text-end', id: 't' })
+    source.push({ type: 'finish' })
+    source.controller.close()
+    const rest: string[] = []
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      rest.push(value.type)
+    }
+    expect(rest).toEqual(['text-delta', 'text-end', 'finish'])
+    expect(check).toHaveBeenCalledTimes(2)
+  })
+
+  it('judges each piece with the tail of what is already shown', async () => {
+    const check = vi.fn(async (_text: string) => ({ level: 'safe' as const }))
+    const first = paragraph(6)
+    await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start' },
+          { type: 'text-start', id: 't' },
+          { type: 'text-delta', id: 't', delta: first },
+          { type: 'text-delta', id: 't', delta: 'Drugi kawałek.' },
+          { type: 'text-end', id: 't' },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(check.mock.calls[0][0]).toBe(first)
+    expect(check.mock.calls[1][0]).toBe(`${first.slice(-300)}Drugi kawałek.`)
+  })
+
+  it('keeps safe pieces, closes the open text and stops when a later piece is blocked', async () => {
+    const check = vi
+      .fn()
+      .mockResolvedValueOnce({ level: 'safe' })
+      .mockResolvedValueOnce({ level: 'unsafe' })
+    const onBlocked = vi.fn()
+    const source = controllableSource()
+    const out = collect(guardUiMessageStream(source.stream, check, onBlocked))
+    source.push({ type: 'start', messageId: 'm1' })
+    source.push({ type: 'text-start', id: 't' })
+    source.push({ type: 'text-delta', id: 't', delta: paragraph(6) })
+    source.push({ type: 'text-delta', id: 't', delta: 'Zła treść, której nie wolno pokazać.' })
+    source.push({ type: 'text-end', id: 't' })
+    const chunks = await out
+    expect(onBlocked).toHaveBeenCalledTimes(1)
+    expect(source.cancelled).toHaveBeenCalled()
+    const text = chunks.flatMap((c) => (c.type === 'text-delta' ? [c.delta] : [])).join('')
+    expect(text).toContain('Smok leciał')
+    expect(text).not.toContain('Zła treść')
+    expect(text).toContain(KIDS_BLOCKED_MESSAGE)
+    const message = await assemble(chunks)
+    expect(message?.parts.filter((p) => p.type === 'text')).toEqual([
+      expect.objectContaining({ text: paragraph(6), state: 'done' }),
+      expect.objectContaining({ text: KIDS_BLOCKED_MESSAGE }),
+    ])
+  })
+
+  it('judges pending text before passing on a source error', async () => {
+    const check = vi.fn(async () => ({ level: 'safe' as const }))
+    const source = controllableSource()
+    const reader = guardUiMessageStream(source.stream, check).getReader()
+    source.push({ type: 'start', messageId: 'm1' })
+    source.push({ type: 'text-start', id: 't' })
+    source.push({ type: 'text-delta', id: 't', delta: 'Krótko' })
+    // Erroring a stream drops its queue, so let the guard read the chunks first.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    source.controller.error(new Error('model crashed'))
+    const types: string[] = []
+    await expect(
+      (async () => {
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) return
+          types.push(value.type)
+        }
+      })(),
+    ).rejects.toThrow('model crashed')
+    expect(check).toHaveBeenCalledWith('Krótko')
+  })
+
+  it('passes the start chunk through before anything is judged', async () => {
     let release: () => void = () => {}
     const pending = new Promise<void>((resolve) => (release = resolve))
     const check = vi.fn(async () => {

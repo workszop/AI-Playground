@@ -99,10 +99,21 @@ const BLOCKLIST_PATTERN = new RegExp(
   'iu',
 )
 
-// Sized to stay inside the guard server's 4096-token window with the template.
-const GUARD_WINDOW_CHARS = 4000
-const GUARD_PROMPT_CONTEXT_CHARS = 1500
+// Sized so a check fits one 3072-token guard slot even at one token per character.
+const GUARD_WINDOW_CHARS = 2000
+const GUARD_PROMPT_CONTEXT_CHARS = 600
 const GUARD_TIMEOUT_MS = 120_000
+// Prompt and reply checks use different instructions; each keeps its own cached slot.
+const GUARD_PROMPT_SLOT = 0
+const GUARD_REPLY_SLOT = 1
+
+// A streamed reply is judged and shown in pieces: a short first piece so text
+// appears early, then larger ones, since every check slows the chat model on a
+// shared GPU. Overlap plus the largest piece stays within one guard window.
+type ReplyPieceSize = { paragraph: number; sentence: number; max: number }
+const FIRST_REPLY_PIECE: ReplyPieceSize = { paragraph: 150, sentence: 300, max: 800 }
+const LATER_REPLY_PIECE: ReplyPieceSize = { paragraph: 800, sentence: 1200, max: 1600 }
+const REPLY_OVERLAP_CHARS = 300
 
 export type KidsGuardLevel = 'safe' | 'controversial' | 'unsafe' | 'unavailable'
 
@@ -290,6 +301,8 @@ async function classify(
       n_predict: 8,
       stop: ['\n'],
       cache_prompt: true,
+      id_slot:
+        messages[messages.length - 1]?.role === 'assistant' ? GUARD_REPLY_SLOT : GUARD_PROMPT_SLOT,
     }),
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   })
@@ -369,48 +382,121 @@ export function textOnlyChunks(text: string): UIMessageChunk[] {
   ]
 }
 
+/** Whether the unreleased reply text has reached a natural point to be judged and shown. */
+export function replyPieceReady(piece: string, firstPiece: boolean): boolean {
+  const size = firstPiece ? FIRST_REPLY_PIECE : LATER_REPLY_PIECE
+  if (piece.length >= size.max) return true
+  if (piece.length >= size.paragraph && /\n\s*\n\s*$/.test(piece)) return true
+  return piece.length >= size.sentence && /[.!?…:]["')\]]?\s*$/.test(piece)
+}
+
 /**
- * Holds a UI message stream until it ends, judges the reply text, then releases
- * it unchanged or replaces it with the blocked message. Reasoning is dropped:
- * it is shown in the chat but is not what the guard judged.
+ * Releases a UI message stream piece by piece: reply text is held until it
+ * reaches a paragraph or sentence break, judged together with the tail of what
+ * is already on screen, and only then shown. The model keeps streaming while a
+ * piece is judged. A blocked piece is never shown: the open text is closed, the
+ * blocked message is appended, the source is cancelled and `onBlocked` fires so
+ * the caller can stop generation. Reasoning is dropped, since it is not judged.
  */
 export function guardUiMessageStream(
   stream: ReadableStream<UIMessageChunk>,
   check: (replyText: string) => Promise<KidsGuardVerdict>,
+  onBlocked?: () => void,
 ): ReadableStream<UIMessageChunk> {
+  const reader = stream.getReader()
+  const incoming: UIMessageChunk[] = []
+  let sourceDone = false
+  let sourceError: unknown = undefined
+  let wake: (() => void) | null = null
+  const notify = () => {
+    const resolve = wake
+    wake = null
+    resolve?.()
+  }
+  void (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        incoming.push(value)
+        notify()
+      }
+    } catch (error) {
+      sourceError = error ?? new Error('Reply stream failed')
+    } finally {
+      sourceDone = true
+      notify()
+    }
+  })()
+  const nextChunk = async (): Promise<UIMessageChunk | undefined> => {
+    while (incoming.length === 0 && !sourceDone) {
+      await new Promise<void>((resolve) => (wake = resolve))
+    }
+    return incoming.shift()
+  }
+
   return new ReadableStream<UIMessageChunk>({
     async start(controller) {
-      const held: UIMessageChunk[] = []
-      let replyText = ''
-      try {
-        for await (const chunk of stream) {
-          if (chunk.type === 'start') {
-            controller.enqueue(chunk)
-            continue
-          }
-          if (chunk.type.startsWith('reasoning-')) continue
-          if (chunk.type === 'text-delta') replyText += chunk.delta
-          held.push(chunk)
-        }
-      } catch (error) {
-        controller.error(error)
-        return
+      const openText = new Set<string>()
+      let held: UIMessageChunk[] = []
+      let piece = ''
+      let shown = ''
+
+      const emit = (chunk: UIMessageChunk) => {
+        if (chunk.type === 'text-start') openText.add(chunk.id)
+        if (chunk.type === 'text-end') openText.delete(chunk.id)
+        controller.enqueue(chunk)
       }
-      const verdict = await check(replyText)
-      const released = isBlocked(verdict)
-        ? [
-            ...textOnlyChunks(blockedMessageFor(verdict)),
-            ...held.filter(
-              (chunk) =>
-                chunk.type === 'finish' ||
-                chunk.type === 'error' ||
-                chunk.type === 'abort' ||
-                chunk.type === 'message-metadata',
-            ),
-          ]
-        : held
-      for (const chunk of released) controller.enqueue(chunk)
-      controller.close()
+      // Resolves false when the piece was blocked and the stream is finished.
+      const settlePiece = async (): Promise<boolean> => {
+        if (piece.trim()) {
+          const verdict = await check(shown.slice(-REPLY_OVERLAP_CHARS) + piece)
+          if (isBlocked(verdict)) {
+            for (const id of openText) controller.enqueue({ type: 'text-end', id })
+            for (const chunk of textOnlyChunks(blockedMessageFor(verdict)))
+              controller.enqueue(chunk)
+            controller.enqueue({ type: 'finish' })
+            controller.close()
+            onBlocked?.()
+            await reader.cancel().catch(() => {})
+            return false
+          }
+        }
+        held.forEach(emit)
+        held = []
+        shown += piece
+        piece = ''
+        return true
+      }
+
+      for (;;) {
+        const chunk = await nextChunk()
+        if (!chunk) break
+        if (chunk.type === 'start') {
+          emit(chunk)
+          continue
+        }
+        if (chunk.type.startsWith('reasoning-')) continue
+        if (chunk.type === 'text-delta') {
+          piece += chunk.delta
+          held.push(chunk)
+          if (replyPieceReady(piece, !shown) && !(await settlePiece())) return
+          continue
+        }
+        if (chunk.type === 'text-start') {
+          held.push(chunk)
+          continue
+        }
+        // Anything else (text end, tool activity, step and finish markers) closes the piece.
+        if (!(await settlePiece())) return
+        emit(chunk)
+      }
+      if (!(await settlePiece())) return
+      if (sourceError !== undefined) controller.error(sourceError)
+      else controller.close()
+    },
+    cancel(reason) {
+      return reader.cancel(reason)
     },
   })
 }

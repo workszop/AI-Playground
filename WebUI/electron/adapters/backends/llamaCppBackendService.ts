@@ -1822,10 +1822,11 @@ export class LlamaCppBackendService implements ApiService {
       modelPath,
       '--port',
       port.toString(),
+      // Two slots of 3072 tokens: kidsGuard pins prompt and reply checks to one each.
       '--ctx-size',
-      '4096',
+      '6144',
       '--parallel',
-      '1',
+      '2',
       '--jinja',
       '--log-prefix',
       ...withCpuDeviceParameters(['--gpu-layers', '999'], this.selectedDevice()),

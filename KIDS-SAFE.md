@@ -7,7 +7,7 @@ This fork of [intel/AI-Playground](https://github.com/intel/AI-Playground) adds 
 | Path | Check |
 | --- | --- |
 | Chat message the child types | Word list (PL/EN), then Qwen3Guard-Gen-4B prompt moderation, before any model runs |
-| Chat reply | Held until complete, judged by Qwen3Guard in the context of the question, then shown or replaced. Reasoning ("thinking") text is never shown |
+| Chat reply | Shown in pieces, each judged by Qwen3Guard (with the question and the end of the text already shown) before it appears. A blocked piece is never shown: the reply stops and the blocked message is added. Reasoning ("thinking") text is never shown |
 | Image prompt (image panel and chat image tool) | Same prompt check, before ComfyUI starts |
 | Generated image | `SafetyChecker` node (vit-base-nsfw-detector) on every image in the batch, threshold locked at 0.1. Includes the OpenVINO variants, Colorize, Change Face and Upscale |
 | Live previews | Never shown (they are unfiltered intermediate frames) |
@@ -19,7 +19,7 @@ Blocked requests get the reply "Nie mogę w tym pomóc. Zapytaj o coś innego. /
 
 - The **Llama.cpp** backend must be installed. The guard runs as its own llama-server on loopback, on the device selected for Llama.cpp.
 - On first use the app asks to download the guard model `mradermacher/Qwen3Guard-Gen-4B-GGUF` (Q4_K_M, about 2.7 GB) through the normal download dialog. Until it is downloaded, chat and image generation are blocked.
-- Measured on an Intel Core Ultra 5 135U iGPU: about 0.7 s per prompt check, under 1 s for a typical reply, about 8 s for a very long reply (3,200 characters). Replies are held until checked, so that time is added to every answer.
+- Measured on an Intel Core Ultra 5 135U iGPU with Qwen3.5-4B as the chat model: about 2 s per prompt check; the first part of a reply appears after about 20 s (3-4 s without the guard), and a 1,650-character answer is fully shown after about 77 s (about 55 s without the guard). The guard shares the GPU with the chat model, which slows generation by about 25%. Running the guard on the CPU instead was slower on this laptop.
 - Image presets download `AdamCodd/vit-base-nsfw-detector` as before.
 
 ## Code

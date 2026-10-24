@@ -1399,6 +1399,57 @@ describe('turn engine', () => {
     expect(bodyMessages()[0]).toMatchObject({ role: 'system', content: 'You are helpful.' })
   })
 
+  it('kids guard: keeps checked text, stops the turn and persists what was shown when a later piece is blocked', async () => {
+    const guard = await import('../../safety/kidsGuard')
+    vi.mocked(guard.checkKidsResponse)
+      .mockResolvedValueOnce({ level: 'safe' })
+      .mockResolvedValueOnce({ level: 'unsafe' })
+    const first = `${'Smok leciał nad górami i lasami. '.repeat(6)}\n\n`
+    queueFetchMock(
+      sse([
+        ...textChunks(first).slice(0, 1),
+        ...textChunks('Zła treść.').slice(0, 1),
+        ...textChunks('').slice(1),
+      ]),
+    )
+    const { turnId } = submitChatTurn(
+      turnRequest({ persist: { meta: null, ragHashes: [], lastMainKey: 'conv-1' } }),
+    )
+    await waitForTurnDone(turnId)
+
+    const shown = chatChunks()
+      .flatMap((c) => (c.type === 'text-delta' ? [c.delta] : []))
+      .join('')
+    expect(shown).toContain('Smok leciał')
+    expect(shown).not.toContain('Zła treść')
+    expect(shown).toContain(guard.KIDS_BLOCKED_MESSAGE)
+    expect(chatChunks().some((c) => c.type === 'error')).toBe(false)
+    expect(chatTurnActive('conv-1')).toBe(false)
+    const saved = saveChatTurnConversation.mock.calls.at(-1)?.[0] as unknown as {
+      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>
+    }
+    const assistantText = saved.messages
+      .filter((m) => m.role === 'assistant')
+      .flatMap((m) => m.parts.flatMap((p) => (p.type === 'text' ? [p.text] : [])))
+      .join('')
+    expect(assistantText).toContain('Smok leciał')
+    expect(assistantText).not.toContain('Zła treść')
+  })
+
+  it('kids guard: answers a blocked prompt without calling the model', async () => {
+    const guard = await import('../../safety/kidsGuard')
+    vi.mocked(guard.checkKidsPrompt).mockResolvedValueOnce({ level: 'unsafe' })
+    queueFetchMock(sse(textChunks('must not be requested')))
+    const { turnId } = submitChatTurn(turnRequest())
+    await waitForTurnDone(turnId)
+
+    expect(requests).toHaveLength(0)
+    const shown = chatChunks()
+      .flatMap((c) => (c.type === 'text-delta' ? [c.delta] : []))
+      .join('')
+    expect(shown).toBe(guard.KIDS_BLOCKED_MESSAGE)
+  })
+
   it('writes the thread file on turn start and again with the assembled assistant', async () => {
     queueFetchMock(sse(textChunks('Hello')))
     const persist = {

@@ -1227,8 +1227,10 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
       pendingToolExecutes,
     )
     // Guarded before the tee, so what is persisted is what the child saw.
-    const stream = guardUiMessageStream(unguardedStream, (replyText) =>
-      checkKidsResponse(userText, replyText, turn.controller.signal),
+    const stream = guardUiMessageStream(
+      unguardedStream,
+      (replyText) => checkKidsResponse(userText, replyText, turn.controller.signal),
+      () => turn.controller.abort(),
     )
 
     const persistMessages = async (assistant: UIMessage | undefined) => {

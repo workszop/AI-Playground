@@ -1,6 +1,6 @@
-# AI Playground w wersji dla dzieci: instalacja na Windowsie
+# Kids-safe AI Playground: instalacja w systemie Windows
 
-To fork [Intel AI Playground](https://github.com/intel/AI-Playground) z filtrami treści dla dzieci. Model bezpieczeństwa sprawdza wiadomości wpisywane na czacie, odpowiedzi czatu i opisy obrazów, a osobny filtr sprawdza wygenerowane obrazy. Oryginalny opis projektu od Intela jest w pliku [README-intel.md](README-intel.md).
+Ta aplikacja to fork [Intel AI Playground](https://github.com/intel/AI-Playground) z dodatkowymi filtrami nieodpowiednich treści. Dodatkowe modele bezpieczeństwa sprawdzają wiadomości wpisywane na czacie, odpowiedzi czatu i prompty do generowania obrazów, a osobny filtr sprawdza wygenerowane obrazy. 
 
 Ten przewodnik opisuje, jak uruchomić tę wersję na komputerze z Windowsem:
 

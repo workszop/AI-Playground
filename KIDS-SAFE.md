@@ -1,12 +1,12 @@
 # Kids-safe AI Playground: filtry treści
 
-Ten fork [intel/AI-Playground](https://github.com/intel/AI-Playground) dodaje filtry treści dla dzieci. Każdy filtr działa według zasady „w razie wątpliwości blokuj”: jeśli sprawdzenie nie może się odbyć, prośba zostaje zablokowana.
+Ten fork [intel/AI-Playground](https://github.com/intel/AI-Playground) dodaje filtry nieodpowiednich treści. Każdy filtr działa według zasady „w razie wątpliwości blokuj”: jeśli sprawdzenie nie może się odbyć, prośba zostaje zablokowana.
 
 ## Co jest filtrowane
 
 | Miejsce | Sprawdzenie |
 | --- | --- |
-| Wiadomość wpisana przez dziecko na czacie | Lista słów (polskich i angielskich), a potem ocena promptu przez Qwen3Guard-Gen-4B, zanim uruchomi się jakikolwiek model |
+| Wiadomość wpisana przez użytkownika na czacie | Lista słów (polskich i angielskich), a potem ocena promptu przez Qwen3Guard-Gen-4B, zanim uruchomi się jakikolwiek model |
 | Odpowiedź czatu | Pokazywana kawałkami. Każdy kawałek ocenia Qwen3Guard (razem z pytaniem i końcówką już pokazanego tekstu), zanim się wyświetli. Zablokowany kawałek nigdy się nie pojawia: odpowiedź się urywa i dochodzi komunikat o blokadzie. Tekst rozumowania modelu („thinking”) nigdy się nie wyświetla |
 | Prompt obrazu (panel obrazów i narzędzie obrazów w czacie) | To samo sprawdzenie promptu, zanim ruszy ComfyUI |
 | Wygenerowany obraz | Węzeł `SafetyChecker` (vit-base-nsfw-detector) na każdym obrazie z serii, z progiem zablokowanym na 0,4 (czułość 0,6). Obejmuje też warianty OpenVINO, Colorize, Change Face i Upscale |
@@ -54,12 +54,12 @@ Aplikacja wybiera miejsce dla modelu bezpieczeństwa na podstawie sprzętu i pr�
 
 Żaden filtr nie jest doskonały. W zestawie 50 polskich promptów model 4B razem z listą słów przepuścił 0 z 30 szkodliwych i zablokował 1 z 20 niewinnych (rodzina w strojach kąpielowych na basenie). Zestaw jest mały, więc te liczby to tylko wskazówka. Najsłabszy punkt to krótki polski slang i właśnie dla niego istnieje lista słów.
 
-Próg 0,4 dla obrazów wybrano na podstawie testu na 136 obrazach (bez obrazów jednoznacznie dla dorosłych). Zablokował wszystkie 11 obrazów ze strojami kąpielowymi, bielizną i leżącymi nagimi postaciami, ale też mniej więcej co piąty niewinny obraz wygenerowany z promptów dziecięcych (model SD1.5 często rysuje „dziewczynkę”, „syrenę” czy „baletnicę” jako wystylizowane dorosłe kobiety) i 5 z 64 niewinnych zdjęć. Zablokowany obraz wraca czarny.
+Próg 0,4 dla obrazów wybrano na podstawie testu na 136 obrazach (bez obrazów jednoznacznie dla dorosłych). Zablokował wszystkie 11 obrazów ze strojami kąpielowymi, bielizną i leżącymi nagimi postaciami, ale też mniej więcej co piąty niewinny obraz wygenerowany z niewinnych promptów testowych (model SD1.5 często rysuje „dziewczynkę”, „syrenę” czy „baletnicę” jako wystylizowane dorosłe kobiety) i 5 z 64 niewinnych zdjęć. Zablokowany obraz wraca czarny.
 
 Presety wideo i zamiana tekstu na mowę nie są filtrowane.
 
-Używaj aplikacji razem z osobnym kontem dziecka bez uprawnień administratora i z kontrolą rodzicielską systemu. Dziecko z uprawnieniami administratora może zmienić samą aplikację. Presety obrazów i pliki węzłów ComfyUI są kopiowane do folderu, w którym każdy użytkownik może zapisywać. Zmiany, które usuwają albo osłabiają filtr obrazów, wyłapuje opisana wyżej kontrola nienaruszalności, ale ktoś, kto umie pisać w Pythonie, nadal mógłby zmienić w tym folderze samo ComfyUI albo model wykrywający. Filtr tekstu i kontrola nienaruszalności są częścią plików programu, więc przy instalacji dla wszystkich użytkowników pozostają chronione.
+Używaj aplikacji razem z osobnym kontem użytkownika bez uprawnień administratora i z kontrolą rodzicielską systemu. Użytkownik z uprawnieniami administratora może zmienić samą aplikację. Presety obrazów i pliki węzłów ComfyUI są kopiowane do folderu, w którym każdy użytkownik może zapisywać. Zmiany, które usuwają albo osłabiają filtr obrazów, wyłapuje opisana wyżej kontrola nienaruszalności, ale ktoś, kto umie pisać w Pythonie, nadal mógłby zmienić w tym folderze samo ComfyUI albo model wykrywający. Filtr tekstu i kontrola nienaruszalności są częścią plików programu, więc przy instalacji dla wszystkich użytkowników pozostają chronione.
 
 ## Instalacja na Windowsie
 
-Jak zbudować instalator, zainstalować aplikację dla dziecka i przejść listę kontrolną, opisuje [README.md](README.md).
+Jak zbudować instalator, zainstalować aplikację dla użytkownika i przejść listę kontrolną, opisuje [README.md](README.md).

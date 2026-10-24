@@ -8,7 +8,7 @@ Ten przewodnik opisuje, jak uruchomić tę wersję na komputerze z Windowsem:
 2. jak [zainstalować aplikację](#3-instalacja-na-komputerze-dziecka) na komputerze dziecka tak, żeby dziecko nie mogło łatwo wyłączyć filtrów,
 3. jak [ją przetestować](#4-testy-automatyczne): testami automatycznymi na komputerze, na którym budujesz instalator, i krótką listą kontrolną na komputerze dziecka.
 
-Co dokładnie filtruje ta wersja, a czego nie, opisuje plik [KIDS-SAFE.md](KIDS-SAFE.md) (po angielsku). Zanim dasz aplikację dziecku, przeczytaj w nim sekcję „Limits”.
+Co dokładnie filtruje ta wersja, a czego nie, opisuje plik [KIDS-SAFE.md](KIDS-SAFE.md). Zanim dasz aplikację dziecku, przeczytaj w nim sekcję „Ograniczenia”.
 
 > **Stan prac:** zmiany powstały i były testowane na Linuksie. Windows to główna platforma oryginalnego AI Playground, a zmiany korzystają tam z tych samych składników, ale tej wersji nikt jeszcze nie uruchomił na Windowsie. Zanim jej zaufasz, przejdź [listę kontrolną z punktu 5](#5-lista-kontrolna-na-komputerze-dziecka) i zgłoś wszystko, co nie działa.
 

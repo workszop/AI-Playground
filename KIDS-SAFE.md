@@ -1,59 +1,65 @@
-# Kids-safe build
+# Kids-safe AI Playground: filtry treści
 
-This fork of [intel/AI-Playground](https://github.com/intel/AI-Playground) adds content filtering for children. Every filter fails closed: if a check cannot run, the request is blocked.
+Ten fork [intel/AI-Playground](https://github.com/intel/AI-Playground) dodaje filtry treści dla dzieci. Każdy filtr działa według zasady „w razie wątpliwości blokuj”: jeśli sprawdzenie nie może się odbyć, prośba zostaje zablokowana.
 
-## What is filtered
+## Co jest filtrowane
 
-| Path | Check |
+| Miejsce | Sprawdzenie |
 | --- | --- |
-| Chat message the child types | Word list (PL/EN), then Qwen3Guard-Gen-4B prompt moderation, before any model runs |
-| Chat reply | Shown in pieces, each judged by Qwen3Guard (with the question and the end of the text already shown) before it appears. A blocked piece is never shown: the reply stops and the blocked message is added. Reasoning ("thinking") text is never shown |
-| Image prompt (image panel and chat image tool) | Same prompt check, before ComfyUI starts |
-| Generated image | `SafetyChecker` node (vit-base-nsfw-detector) on every image in the batch, threshold locked at 0.4 (strength 0.6). Includes the OpenVINO variants, Colorize, Change Face and Upscale |
-| Image filter integrity | Before each image run the app checks the workflow it is about to send: every saved image must come straight from a `SafetyChecker` with a threshold of 0.4 or lower, otherwise the run is refused. An image from any other node is never shown (animated output is allowed only for video presets, which are not filtered). The `SafetyChecker` node files are compared with the copy built into the app and restored (with a ComfyUI restart) if they were changed |
-| Live previews | Never shown (they are unfiltered intermediate frames) |
-| Agent mode (Agent, Game Agent, Quick Coder) | Turned off: those turns stream outside the chat guard |
+| Wiadomość wpisana przez dziecko na czacie | Lista słów (polskich i angielskich), a potem ocena promptu przez Qwen3Guard-Gen-4B, zanim uruchomi się jakikolwiek model |
+| Odpowiedź czatu | Pokazywana kawałkami. Każdy kawałek ocenia Qwen3Guard (razem z pytaniem i końcówką już pokazanego tekstu), zanim się wyświetli. Zablokowany kawałek nigdy się nie pojawia: odpowiedź się urywa i dochodzi komunikat o blokadzie. Tekst rozumowania modelu („thinking”) nigdy się nie wyświetla |
+| Prompt obrazu (panel obrazów i narzędzie obrazów w czacie) | To samo sprawdzenie promptu, zanim ruszy ComfyUI |
+| Wygenerowany obraz | Węzeł `SafetyChecker` (vit-base-nsfw-detector) na każdym obrazie z serii, z progiem zablokowanym na 0,4 (czułość 0,6). Obejmuje też warianty OpenVINO, Colorize, Change Face i Upscale |
+| Nienaruszalność filtra obrazów | Przed każdym generowaniem obrazu aplikacja sprawdza workflow, który ma wysłać: każdy zapisywany obraz musi wychodzić prosto z węzła `SafetyChecker` z progiem 0,4 lub niższym, inaczej generowanie zostaje odrzucone. Obraz z każdego innego węzła nigdy się nie wyświetla (animacje są dozwolone tylko w presetach wideo, których nic nie filtruje). Pliki węzła `SafetyChecker` są porównywane z kopią wbudowaną w aplikację i przywracane (z ponownym uruchomieniem ComfyUI), jeśli ktoś je zmienił |
+| Podgląd na żywo | Nigdy się nie wyświetla, bo to niefiltrowane klatki pośrednie |
+| Tryb agenta (Agent, Game Agent, Quick Coder) | Wyłączony, bo odpowiedzi agenta nie przechodzą przez filtr czatu |
 
-The integrity check refuses two kinds of preset that save images without a `SafetyChecker` in front: the Acer VisionArt partner preset (it saves through Acer's own node) and the dev-only "Dummy Image" and "Dummy Edit" presets.
+Kontrola nienaruszalności odrzuca dwa rodzaje presetów, które zapisują obrazy bez węzła `SafetyChecker` przed zapisem: partnerski preset Acer VisionArt (zapisuje obraz własnym węzłem Acera) i presety „Dummy Image” oraz „Dummy Edit”, dostępne tylko w trybie deweloperskim.
 
-Blocked requests get the reply "Nie mogę w tym pomóc. Zapytaj o coś innego. / I can't help with that. Try asking about something else." Both "Unsafe" and "Controversial" verdicts block.
+Na zablokowaną prośbę aplikacja odpowiada: „Nie mogę w tym pomóc. Zapytaj o coś innego. / I can't help with that. Try asking about something else.” Blokują oba werdykty modelu: „Unsafe” i „Controversial”.
 
-## Requirements
+## Wymagania
 
-- The **Llama.cpp** backend must be installed. The guard runs as its own llama-server on loopback, never with the user's startup parameters.
-- On first use the app asks, in one download dialog, for both guard models: `mradermacher/Qwen3Guard-Gen-4B-GGUF` (Q4_K_M, about 2.7 GB) and `QuantFactory/Qwen3Guard-Gen-0.6B-GGUF` (Q8_0, about 0.8 GB), so a fallback never downloads mid-session. Until at least one guard model is downloaded, chat and image generation are blocked.
-- Measured on an Intel Core Ultra 5 135U iGPU with Qwen3.5-4B as the chat model: about 2 s per prompt check; the first part of a reply appears after about 20 s (3-4 s without the guard), and a 1,650-character answer is fully shown after about 77 s (about 55 s without the guard). The guard shares the GPU with the chat model, which slows generation by about 25%. Running the guard on the CPU instead was slower on this laptop.
-- Image presets download `AdamCodd/vit-base-nsfw-detector` as before.
+- Musi być zainstalowany backend Llama.cpp. Model bezpieczeństwa działa na osobnym llama-serverze dostępnym tylko lokalnie (loopback) i nigdy nie używa parametrów uruchomienia ustawionych przez użytkownika.
+- Przy pierwszym użyciu aplikacja prosi w jednym oknie o pobranie obu modeli bezpieczeństwa: `mradermacher/Qwen3Guard-Gen-4B-GGUF` (Q4_K_M, około 2,7 GB) i `QuantFactory/Qwen3Guard-Gen-0.6B-GGUF` (Q8_0, około 0,8 GB). Dzięki temu model zapasowy nigdy nie pobiera się w trakcie pracy. Dopóki nie pobierze się przynajmniej jeden z nich, czat i generowanie obrazów są zablokowane.
+- Pomiary na zintegrowanej grafice Intel Core Ultra 5 135U z modelem czatu Qwen3.5-4B: sprawdzenie promptu trwa około 2 s. Pierwsza część odpowiedzi pojawia się po około 20 s (bez filtra po 3–4 s), a odpowiedź o długości 1650 znaków jest w całości widoczna po około 77 s (bez filtra po około 55 s). Ponieważ model bezpieczeństwa dzieli kartę graficzną z modelem czatu, generowanie zwalnia o około 25%. Na procesorze model bezpieczeństwa działał na tym laptopie jeszcze wolniej.
+- Presety obrazów pobierają `AdamCodd/vit-base-nsfw-detector`, tak jak w oryginalnej aplikacji.
 
-## Where the guard runs
+## Gdzie działa model bezpieczeństwa
 
-The guard picks its placement from the hardware and tries the options in order. It takes the first one that fits in free memory (with headroom); the last option is used even if it does not fit. A model is about 3.6 GiB (4B) or 1.4 GiB (0.6B) in memory.
+Aplikacja wybiera miejsce dla modelu bezpieczeństwa na podstawie sprzętu i próbuje kolejnych możliwości po kolei. Bierze pierwszą, która mieści się w wolnej pamięci (z zapasem). Ostatnia możliwość jest używana nawet wtedy, gdy się nie mieści. W pamięci 4B zajmuje około 3,6 GiB, a 0.6B około 1,4 GiB.
 
-| Hardware | Order of placements | During image generation |
+| Sprzęt | Kolejność prób | W trakcie generowania obrazów |
 | --- | --- | --- |
-| No GPU | 4B on CPU, 0.6B on CPU | Keeps running |
-| Integrated GPU (shared memory) | 4B on GPU, 4B on CPU, 0.6B on GPU, 0.6B on CPU | Stopped, so the image model gets the memory |
-| Discrete GPU, 8 GiB or less (or unknown) | 4B on CPU, 0.6B on GPU, 0.6B on CPU | CPU placements keep running; the 0.6B on GPU is stopped |
-| Discrete GPU, more than 8 GiB | 4B on GPU, 4B on CPU, 0.6B on GPU, 0.6B on CPU | CPU placements keep running; GPU placements are stopped |
+| Bez karty graficznej | 4B na procesorze, 0.6B na procesorze | Działa dalej |
+| Zintegrowana grafika (pamięć współdzielona) | 4B na grafice, 4B na procesorze, 0.6B na grafice, 0.6B na procesorze | Zatrzymany, żeby model obrazów dostał pamięć |
+| Osobna karta, 8 GiB lub mniej (albo nieznana ilość) | 4B na procesorze, 0.6B na karcie, 0.6B na procesorze | Na procesorze działa dalej, 0.6B na karcie jest zatrzymywany |
+| Osobna karta, ponad 8 GiB | 4B na karcie, 4B na procesorze, 0.6B na karcie, 0.6B na procesorze | Na procesorze działa dalej, na karcie jest zatrzymywany |
 
-- The 0.6B is a fallback only: on the project's 50-prompt Polish test set it missed 8 of 30 harmful prompts and blocked 4 of 20 harmless ones, while the 4B (Q4_K_M) missed 4 and blocked 1 (word list not counted). To forbid it, set `KIDS_GUARD_ALLOW_SMALL_FALLBACK = false` in `WebUI/electron/safety/kidsGuard.ts`; the 0.6B is then never planned or downloaded.
-- Missing or unknown memory figures count as "does not fit". If no placement can start, every check is blocked as before.
-- CPU placements use the performance plus efficiency cores (not the low-power E-cores): batch threads clamped to 4-8, generation threads up to 4. Without topology data, half the logical CPUs (4-8). GPU placements use 2 threads.
-- Image prompts are checked before the GPU is handed to image generation, so a guard that has to stop is already done. Chat prompts are checked once the chat model is ready.
+- 0.6B służy tylko jako model zapasowy. W projektowym zestawie 50 polskich promptów przepuścił 8 z 30 szkodliwych i zablokował 4 z 20 niewinnych, a model 4B (Q4_K_M) przepuścił 4 i zablokował 1 (bez uwzględnienia listy słów). Żeby go wyłączyć, ustaw `KIDS_GUARD_ALLOW_SMALL_FALLBACK = false` w pliku `WebUI/electron/safety/kidsGuard.ts`. Model 0.6B nie będzie wtedy ani brany pod uwagę, ani pobierany.
+- Brakujące albo nieznane dane o pamięci liczą się jako „nie mieści się”. Jeśli żadna możliwość nie da się uruchomić, każde sprawdzenie jest blokowane, tak jak wcześniej.
+- Na procesorze model używa rdzeni wydajnościowych i zwykłych rdzeni energooszczędnych (bez rdzeni E o najniższym poborze mocy): od 4 do 8 wątków przy przetwarzaniu promptu i do 4 przy generowaniu. Bez danych o rdzeniach bierze połowę procesorów logicznych (od 4 do 8). Na karcie graficznej używa 2 wątków.
+- Prompty obrazów są sprawdzane, zanim karta graficzna przejdzie do generowania obrazów, więc model bezpieczeństwa, który musi się zatrzymać, ma już pracę za sobą. Prompty czatu są sprawdzane, gdy model czatu jest gotowy.
 
-## Code
+## Kod
 
-- `WebUI/electron/safety/kidsGuard.ts` – guard client, word list, reply holding.
-- `WebUI/electron/safety/guardPlacement.ts`, `WebUI/electron/safety/guardFacts.ts`, `WebUI/electron/safety/cpuTopology.ts` – placement rules, the hardware facts they use and CPU thread counts.
-- `WebUI/electron/adapters/backends/llamaCppBackendService.ts` – `ensureGuardServer` (ignores user startup parameters).
-- `WebUI/electron/chat/turnEngine.ts` (chat prompts and replies), `WebUI/electron/kernel/orchestrator.ts` (image prompts) – where text is checked.
-- `comfyui-deps/custom_nodes/SafetyChecker/nodes.py` and `modes/base/` presets – image output filter.
-- `WebUI/electron/safety/imageFilter.ts` and `WebUI/electron/artifact/runner.ts` – image filter integrity check.
+- `WebUI/electron/safety/kidsGuard.ts`: klient modelu bezpieczeństwa, lista słów i wstrzymywanie odpowiedzi.
+- `WebUI/electron/safety/guardPlacement.ts`, `WebUI/electron/safety/guardFacts.ts`, `WebUI/electron/safety/cpuTopology.ts`: zasady wyboru miejsca, dane o sprzęcie, z których korzystają, i liczba wątków procesora.
+- `WebUI/electron/adapters/backends/llamaCppBackendService.ts`: `ensureGuardServer` (pomija parametry uruchomienia ustawione przez użytkownika).
+- `WebUI/electron/chat/turnEngine.ts` (prompty i odpowiedzi czatu) oraz `WebUI/electron/kernel/orchestrator.ts` (prompty obrazów): miejsca, w których sprawdzany jest tekst.
+- `comfyui-deps/custom_nodes/SafetyChecker/nodes.py` i presety w `modes/base/`: filtr wygenerowanych obrazów.
+- `WebUI/electron/safety/imageFilter.ts` i `WebUI/electron/artifact/runner.ts`: kontrola nienaruszalności filtra obrazów.
 
-## Limits
+## Ograniczenia
 
-No filter is perfect. On a 50-prompt Polish test set the 4B guard plus the word list missed 0 of 30 harmful prompts and blocked 1 of 20 harmless ones (a family in swimsuits at the pool); the set is small, so treat that as indicative. Short Polish slang is the weakest area, which is what the word list is for. The image threshold of 0.4 was chosen on a 136-image test (no explicit images): it blocked all 11 swimwear, lingerie and reclining-nude images, but also about 1 in 5 harmless images generated from kid prompts (the SD1.5 model tends to draw "girl", "mermaid" or "ballerina" as glamorous adults) and 5 of 64 harmless photos; a blocked image comes back black. Video presets and text-to-speech are not filtered. Use this together with a separate non-admin account for the child and OS parental controls. A child with admin rights can change the app itself. The image presets and the ComfyUI node files are copied to a folder each user can write to; edits that remove or weaken the image filter are caught by the integrity check above, but someone who can write Python could still change ComfyUI itself or the detector model there. The text filter and the integrity check are part of the program files and stay protected in an all-users install.
+Żaden filtr nie jest doskonały. W zestawie 50 polskich promptów model 4B razem z listą słów przepuścił 0 z 30 szkodliwych i zablokował 1 z 20 niewinnych (rodzina w strojach kąpielowych na basenie). Zestaw jest mały, więc te liczby to tylko wskazówka. Najsłabszy punkt to krótki polski slang i właśnie dla niego istnieje lista słów.
 
-## Installing on Windows
+Próg 0,4 dla obrazów wybrano na podstawie testu na 136 obrazach (bez obrazów jednoznacznie dla dorosłych). Zablokował wszystkie 11 obrazów ze strojami kąpielowymi, bielizną i leżącymi nagimi postaciami, ale też mniej więcej co piąty niewinny obraz wygenerowany z promptów dziecięcych (model SD1.5 często rysuje „dziewczynkę”, „syrenę” czy „baletnicę” jako wystylizowane dorosłe kobiety) i 5 z 64 niewinnych zdjęć. Zablokowany obraz wraca czarny.
 
-See [README.md](README.md) for building the installer, installing it for a child and the test checklist.
+Presety wideo i zamiana tekstu na mowę nie są filtrowane.
+
+Używaj aplikacji razem z osobnym kontem dziecka bez uprawnień administratora i z kontrolą rodzicielską systemu. Dziecko z uprawnieniami administratora może zmienić samą aplikację. Presety obrazów i pliki węzłów ComfyUI są kopiowane do folderu, w którym każdy użytkownik może zapisywać. Zmiany, które usuwają albo osłabiają filtr obrazów, wyłapuje opisana wyżej kontrola nienaruszalności, ale ktoś, kto umie pisać w Pythonie, nadal mógłby zmienić w tym folderze samo ComfyUI albo model wykrywający. Filtr tekstu i kontrola nienaruszalności są częścią plików programu, więc przy instalacji dla wszystkich użytkowników pozostają chronione.
+
+## Instalacja na Windowsie
+
+Jak zbudować instalator, zainstalować aplikację dla dziecka i przejść listę kontrolną, opisuje [README.md](README.md).

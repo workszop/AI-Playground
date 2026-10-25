@@ -38,6 +38,8 @@ const GUARD_MODELS: Record<GuardModelSize, { repo: string; dir: string; file: st
 }
 // A placement that failed this many times in a row is skipped for the rest of the session.
 const PLACEMENT_FAILURE_LIMIT = 2
+/** How often one check re-plans because the GPU window flipped under it before giving up. */
+const WINDOW_REPLAN_LIMIT = 3
 
 export const KIDS_BLOCKED_MESSAGE =
   'Nie mogę w tym pomóc. Zapytaj o coś innego.\n\n' +
@@ -428,6 +430,7 @@ async function judgeWithFallback(
   let choice = await chooseGuardPlacements(deps, signal)
   let candidates = placementsOnDisk(deps, choice)
   let replanned = false
+  let windowReplans = 0
   const triedHere = new Set<string>()
   let lastError: unknown = new Error('No guard placement can run')
   for (let index = 0; index < candidates.length; index++) {
@@ -438,6 +441,10 @@ async function judgeWithFallback(
     if (!lastResort && (placementFailures.get(key) ?? 0) >= PLACEMENT_FAILURE_LIMIT) continue
     // The window flipped since this list was chosen: never start a guard from the other window's list.
     if (deps.mediaWindowActive() !== choice.media) {
+      if (++windowReplans > WINDOW_REPLAN_LIMIT) {
+        lastError = new Error('The GPU window kept changing while choosing a guard placement')
+        break
+      }
       choice = await chooseGuardPlacements(deps, signal)
       candidates = placementsOnDisk(deps, choice)
       index = -1

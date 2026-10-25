@@ -228,6 +228,89 @@ describe('the orchestrator', () => {
     expect(d.restartChatBackend).toHaveBeenCalledTimes(1)
   })
 
+  it('a queued run still in its prompt check keeps the media window open', async () => {
+    const check = deferred()
+    const d = deps({
+      checkPrompt: vi
+        .fn()
+        .mockResolvedValueOnce({ blocked: false })
+        .mockImplementationOnce(() => check.promise),
+    })
+    setOrchestratorDeps(d)
+    const holdOne = holdNextRun()
+    const active = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(activeRunId).toBe('run-1'))
+
+    const holdTwo = holdNextRun()
+    const queued = submitArtifactRun(payload({ runId: 'run-2' }), { queue: 'queue' })
+    await vi.waitFor(() => expect(d.checkPrompt).toHaveBeenCalledTimes(2))
+
+    holdOne.resolve({ state: 'completed', items: [] })
+    await active
+    expect(d.freeComfyMemory).not.toHaveBeenCalled()
+    expect(d.restartChatBackend).not.toHaveBeenCalled()
+
+    check.resolve({ blocked: false })
+    await vi.waitFor(() => expect(activeRunId).toBe('run-2'))
+    expect(d.stopChatForMedia).toHaveBeenCalledTimes(1)
+    holdTwo.resolve({ state: 'completed', items: [] })
+    await queued
+    expect(d.freeComfyMemory).toHaveBeenCalledTimes(1)
+    expect(d.restartChatBackend).toHaveBeenCalledTimes(1)
+  })
+
+  it('a queued check that is blocked returns the GPU to chat', async () => {
+    const check = deferred()
+    const d = deps({
+      checkPrompt: vi
+        .fn()
+        .mockResolvedValueOnce({ blocked: false })
+        .mockImplementationOnce(() => check.promise),
+    })
+    setOrchestratorDeps(d)
+    const holdOne = holdNextRun()
+    const active = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(activeRunId).toBe('run-1'))
+    const queued = submitArtifactRun(payload({ runId: 'run-2' }), { queue: 'queue' })
+    await vi.waitFor(() => expect(d.checkPrompt).toHaveBeenCalledTimes(2))
+
+    holdOne.resolve({ state: 'completed', items: [] })
+    await active
+    expect(d.restartChatBackend).not.toHaveBeenCalled()
+
+    check.resolve({ blocked: true, message: 'Nope.' })
+    expect((await queued).state).toBe('failed')
+    await vi.waitFor(() => expect(d.restartChatBackend).toHaveBeenCalledTimes(1))
+    expect(d.freeComfyMemory).toHaveBeenCalledTimes(1)
+  })
+
+  it('a queued check that needs the chat window gets it back', async () => {
+    const d = deps({
+      checkPrompt: vi
+        .fn()
+        .mockResolvedValueOnce({ blocked: false })
+        .mockImplementationOnce(async (_prompt: string, signal: AbortSignal) => {
+          await awaitChatWindow(signal)
+          return { blocked: false }
+        }),
+    })
+    setOrchestratorDeps(d)
+    const holdOne = holdNextRun()
+    const active = submitArtifactRun(payload())
+    await vi.waitFor(() => expect(activeRunId).toBe('run-1'))
+    const holdTwo = holdNextRun()
+    const queued = submitArtifactRun(payload({ runId: 'run-2' }), { queue: 'queue' })
+    await vi.waitFor(() => expect(d.checkPrompt).toHaveBeenCalledTimes(2))
+
+    holdOne.resolve({ state: 'completed', items: [] })
+    await active
+    await vi.waitFor(() => expect(d.restartChatBackend).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(activeRunId).toBe('run-2'))
+    expect(d.stopChatForMedia).toHaveBeenCalledTimes(2)
+    holdTwo.resolve({ state: 'completed', items: [] })
+    await queued
+  })
+
   it('does not admit a GPU chat turn while stopChatForMedia is in flight', async () => {
     const stop = deferred()
     const d = deps({ stopChatForMedia: vi.fn(() => stop.promise as Promise<void>) })

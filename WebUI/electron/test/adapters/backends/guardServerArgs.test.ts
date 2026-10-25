@@ -26,8 +26,11 @@ const cpu: GuardPlacement = {
 const base = { modelPath: '/m/guard.gguf', port: 39300 }
 
 describe('buildGuardServerArgs', () => {
-  it('pins a gpu placement to its device with 2 threads', () => {
-    const args = buildGuardServerArgs({ ...base, placement: gpu })
+  it('pins a gpu placement to its device with the planned threads', () => {
+    const args = buildGuardServerArgs({
+      ...base,
+      placement: { ...gpu, threads: 3, batchThreads: 5 },
+    })
     expect(args).toEqual([
       '--model',
       '/m/guard.gguf',
@@ -42,7 +45,9 @@ describe('buildGuardServerArgs', () => {
       '--gpu-layers',
       '999',
       '-t',
-      '2',
+      '3',
+      '-tb',
+      '5',
       '--host',
       '127.0.0.1',
     ])

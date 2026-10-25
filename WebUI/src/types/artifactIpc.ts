@@ -34,7 +34,6 @@ export const ArtifactRunRequestSchema = z.object({
   /** Who submitted: renderer drivers register UI items; in-process agent tools do not. */
   origin: z.enum(['renderer', 'agent']).optional(),
   modelsConsented: z.boolean().optional(),
-  showPreview: z.boolean().optional(),
   safetyCheck: z.boolean().optional(),
   keepModelsLoaded: z.boolean().optional(),
   /** Chat conversation the run was asked from — routes orchestrator queue events. */

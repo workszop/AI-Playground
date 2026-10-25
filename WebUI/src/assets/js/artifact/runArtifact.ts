@@ -187,7 +187,6 @@ function buildSettings(
   variantName: string | undefined,
   params: ComfyGenerationParams,
   safetyCheck: boolean,
-  showPreview: boolean,
 ): GenerationSettings {
   const allSettings = {
     preset: preset.name,
@@ -202,7 +201,6 @@ function buildSettings(
     width: params.width,
     resolution: `${params.width}x${params.height}`,
     safetyCheck,
-    showPreview,
   }
   return Object.fromEntries(
     Object.entries(allSettings).filter(
@@ -293,13 +291,7 @@ export async function runArtifact(
 
   // 4. Create the tracked items — the run's only footprint on shared state.
   const baseSeed = params.seed === -1 ? Math.floor(Math.random() * 1_000_000) : params.seed
-  const baseSettings = buildSettings(
-    preset,
-    variantName,
-    params,
-    imageGen.safetyCheck,
-    imageGen.showPreview,
-  )
+  const baseSettings = buildSettings(preset, variantName, params, imageGen.safetyCheck)
   const items: MediaItem[] = Array.from({ length: params.batchSize }, (_, i) => ({
     id: crypto.randomUUID(),
     mode,
@@ -348,7 +340,6 @@ export async function runArtifact(
         variant: variantName,
         origin: 'renderer' as const,
         modelsConsented: true,
-        showPreview: imageGen.showPreview,
         safetyCheck: imageGen.safetyCheck,
         keepModelsLoaded: useDeveloperSettings().keepModelsLoaded,
         conversationKey: ctx.conversationKey,

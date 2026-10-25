@@ -630,6 +630,17 @@ describe('guard placement fallback', () => {
     expect(deps.planGuard).toHaveBeenCalledTimes(2)
   })
 
+  it('gives up as unavailable when the window keeps flipping instead of planning forever', async () => {
+    let windowReads = 0
+    const deps = wire(
+      { chat: [GPU_4B, CPU_4B], media: [CPU_4B] },
+      { mediaWindowActive: () => windowReads++ % 2 === 1 },
+    )
+    expect((await checkKidsPrompt('kot')).level).toBe('unavailable')
+    expect(deps.ensureGuardServer).not.toHaveBeenCalled()
+    expect(vi.mocked(deps.planGuard).mock.calls.length).toBeLessThanOrEqual(5)
+  })
+
   it('blocks on an unparseable answer without trying another placement', async () => {
     const deps = wire({ chat: [GPU_4B, CPU_4B], media: [] })
     answerWith(fetchMock, 'Dawno temu')

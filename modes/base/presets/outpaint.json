@@ -217,24 +217,6 @@
               "title": "Load VAE"
             }
           },
-          "27": {
-            "inputs": {
-              "images": ["14", 0]
-            },
-            "class_type": "PreviewImage",
-            "_meta": {
-              "title": "Preview Image"
-            }
-          },
-          "28": {
-            "inputs": {
-              "images": ["22", 0]
-            },
-            "class_type": "PreviewImage",
-            "_meta": {
-              "title": "Preview Image"
-            }
-          },
           "98": {
             "inputs": {
               "threshold": ["99", 0],

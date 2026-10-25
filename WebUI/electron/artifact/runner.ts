@@ -124,7 +124,6 @@ export type ArtifactRunPayload = {
    * and the runner performs the missing-check and consent request itself.
    */
   modelsConsented?: boolean
-  showPreview?: boolean
   safetyCheck?: boolean
   /** Whether the user asked to keep models loaded (renderer's developer setting). */
   keepModelsLoaded?: boolean
@@ -422,7 +421,6 @@ function buildItems(payload: ArtifactRunPayload): MediaItem[] {
       width: payload.params.width,
       resolution: `${payload.params.width}x${payload.params.height}`,
       safetyCheck: payload.safetyCheck ?? true,
-      showPreview: payload.showPreview ?? true,
     },
     dynamicSettings: payload.inputs.map((input) => ({
       ...input,

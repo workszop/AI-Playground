@@ -55,6 +55,8 @@ class FakeChild extends EventEmitter {
 
 type GuardService = {
   startLlamaGuardServer(modelPath: string, placement: GuardPlacement): Promise<{ isReady: boolean }>
+  ensureGuardServer(modelPath: string, placement: GuardPlacement): Promise<string>
+  isSetUp: boolean
   stopChatServersForMedia(options: { keepGuard: boolean }): Promise<void>
   stopGuardServer(): Promise<void>
   guardPlacement(): GuardPlacement | null
@@ -100,6 +102,14 @@ function runningGuard(service: GuardService): FakeChild {
     isReady: true,
   }
   return child
+}
+
+function deferredStart() {
+  let reject!: (error: Error) => void
+  const promise = new Promise<{ isReady: boolean }>((_resolve, rej) => {
+    reject = rej
+  })
+  return { promise, reject }
 }
 
 const terminatedChildren = () => mocks.terminateProcessTree.mock.calls.map(([proc]) => proc)
@@ -154,6 +164,28 @@ describe('guard server lifecycle', () => {
     expect(healthHits).toBe(2)
     expect(service.guardPlacement()).toEqual(CPU_GUARD)
     expect(mocks.terminateProcessTree).not.toHaveBeenCalled()
+  })
+
+  it('a check that joined a failed start tries its own start instead of failing with it', async () => {
+    const service = guardService()
+    service.isSetUp = true
+    const first = deferredStart()
+    const starts = vi
+      .spyOn(service, 'startLlamaGuardServer')
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(async () => {
+        runningGuard(service)
+        return service.llamaGuardProcess as { isReady: boolean }
+      })
+
+    const a = service.ensureGuardServer('/m/guard.gguf', CPU_GUARD)
+    const b = service.ensureGuardServer('/m/guard.gguf', CPU_GUARD)
+    await Promise.resolve()
+    first.reject(new Error('out of memory'))
+
+    await expect(a).rejects.toThrow('out of memory')
+    expect(await b).toBe('http://127.0.0.1:39300')
+    expect(starts).toHaveBeenCalledTimes(2)
   })
 
   it('reports the last output and kills the child when it exits during startup', async () => {

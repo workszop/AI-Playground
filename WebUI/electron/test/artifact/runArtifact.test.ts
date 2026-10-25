@@ -57,9 +57,6 @@ vi.mock('@/assets/js/store/imageGenerationPresets', () => ({
     get safetyCheck() {
       return true
     },
-    get showPreview() {
-      return false
-    },
     updateImage: (item: MediaItem) => {
       const list = generatedImages.value
       const idx = list.findIndex((img) => img.id === item.id)

@@ -70,6 +70,25 @@ export function checkedImageOutputs(workflow: ComfyUIApiWorkflow): Set<string> {
   return checked
 }
 
+/**
+ * Ids of the nodes that take `images` and feed nothing else: savers and
+ * previews of any class, since ComfyUI writes what they receive to disk.
+ */
+function imageSinks(workflow: ComfyUIApiWorkflow): Set<string> {
+  const consumed = new Set<string>()
+  for (const node of Object.values(workflow) as WorkflowNode[]) {
+    for (const value of Object.values(node.inputs ?? {})) {
+      if (isLink(value)) consumed.add(String(value[0]))
+    }
+  }
+  const sinks = new Set<string>()
+  for (const [id, node] of Object.entries(workflow) as [string, WorkflowNode][]) {
+    const saver = typeof node.class_type === 'string' && node.class_type.includes('SaveImage')
+    if (saver || (isLink(node.inputs?.images) && !consumed.has(id))) sinks.add(id)
+  }
+  return sinks
+}
+
 /** Why a workflow may not run in the kids-safe build, or null when its image filter is intact. */
 export function imageFilterProblem(
   workflow: ComfyUIApiWorkflow,
@@ -82,10 +101,9 @@ export function imageFilterProblem(
     }
   }
   const checked = checkedImageOutputs(workflow)
-  for (const [id, node] of nodes) {
-    const saver = typeof node.class_type === 'string' && node.class_type.includes('SaveImage')
-    if (saver && !checked.has(id))
-      return `${node.class_type} node ${id} is not fed by a SafetyChecker`
+  for (const id of imageSinks(workflow)) {
+    if (!checked.has(id))
+      return `${String(workflow[id]?.class_type)} node ${id} is not fed by a SafetyChecker`
   }
   if (mediaType === 'image' && checked.size === 0) return 'no image output passes a SafetyChecker'
   return null

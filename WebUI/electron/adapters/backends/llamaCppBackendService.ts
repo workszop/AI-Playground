@@ -337,19 +337,15 @@ export function buildGuardServerArgs(options: {
   placement: GuardPlacement
 }): string[] {
   const { placement } = options
-  const deviceArgs =
-    placement.device.kind === 'gpu'
-      ? ['--gpu-layers', '999', '-t', '2']
-      : [
-          '--device',
-          'none',
-          '--gpu-layers',
-          '0',
-          '-t',
-          placement.threads.toString(),
-          '-tb',
-          placement.batchThreads.toString(),
-        ]
+  const deviceArgs = [
+    ...(placement.device.kind === 'gpu'
+      ? ['--gpu-layers', '999']
+      : ['--device', 'none', '--gpu-layers', '0']),
+    '-t',
+    placement.threads.toString(),
+    '-tb',
+    placement.batchThreads.toString(),
+  ]
   return [
     '--model',
     options.modelPath,
@@ -654,9 +650,9 @@ export class LlamaCppBackendService implements ApiService {
       }
       if (this.guardServerStarting) {
         // A concurrent start may have a different model or placement; re-check after it.
+        // A failed start is that caller's failure to count; this one tries for itself.
         const joined = await this.guardServerStarting.catch(() => null)
         if (matches(joined)) return `http://127.0.0.1:${joined.port}`
-        if (!joined) throw new Error('The guard server failed to start')
         continue
       }
       this.guardServerStarting = (async () => {

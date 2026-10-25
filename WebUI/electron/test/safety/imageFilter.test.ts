@@ -66,6 +66,23 @@ describe('imageFilterProblem', () => {
     expect(imageFilterProblem(workflow(0.4, ['3', 1]), 'image')).toMatch(/not fed/)
   })
 
+  it('refuses a saver of any class that skips the SafetyChecker', () => {
+    const wf = workflow(0.4)
+    wf['5'] = { class_type: 'Image Save', inputs: { images: ['1', 0] } } as never
+    expect(imageFilterProblem(wf, 'image')).toMatch(/Image Save node 5 is not fed/)
+    wf['5'] = { class_type: 'PreviewImage', inputs: { images: ['1', 0] } } as never
+    expect(imageFilterProblem(wf, 'image')).toMatch(/PreviewImage node 5 is not fed/)
+  })
+
+  it('allows an unfiltered image to feed another node on its way to the checker', () => {
+    const wf = workflow(0.4)
+    wf['1'] = { class_type: 'VAEDecode', inputs: {} } as never
+    wf['6'] = { class_type: 'ImageScale', inputs: { image: ['1', 0] } } as never
+    wf['7'] = { class_type: 'ImageInvert', inputs: { images: ['6', 0] } } as never
+    ;(wf['3'] as { inputs: Record<string, unknown> }).inputs.image = ['7', 0]
+    expect(imageFilterProblem(wf, 'image')).toBeNull()
+  })
+
   it('refuses an image workflow with no filtered output', () => {
     const wf = workflow(0.4)
     delete wf['4']

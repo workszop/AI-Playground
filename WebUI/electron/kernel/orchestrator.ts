@@ -92,7 +92,12 @@ let admittedArtifactRuns = 0
 const admittedCancels = new Map<string, AbortController>()
 
 // Runs whose prompt is being checked (cancellable), and runs whose prompt passed; the runner refuses any other.
-const checkCancels = new Map<string, { controller: AbortController; panel: boolean }>()
+const checkCancels = new Map<
+  string,
+  { controller: AbortController; panel: boolean; queued: boolean }
+>()
+/** Callers parked in awaitChatWindow; a pending check must not keep the window from them. */
+let chatWindowWaiters = 0
 const checkedRunIds = new Set<string>()
 
 // The media-request lane: one whole `media` bracket (nested specialist + its
@@ -133,6 +138,7 @@ export function resetOrchestratorForTest(): void {
   for (const check of checkCancels.values()) check.controller.abort()
   checkCancels.clear()
   checkedRunIds.clear()
+  chatWindowWaiters = 0
   for (const entry of mediaRequestQueue) {
     entry.reject(new Error('Orchestrator reset for test'))
   }
@@ -154,6 +160,15 @@ export function forgetArtifactPromptCheck(runId: string): void {
 
 export function artifactRunsQueued(): number {
   return runQueue.length
+}
+
+/** Queue-lane runs still in their prompt check: they will park behind the active run. */
+function queuedChecksPending(): number {
+  let count = 0
+  for (const check of checkCancels.values()) {
+    if (check.queued) count += 1
+  }
+  return count
 }
 
 /** Admitted, executing, or queued — close policy and fail-fast both ask. */
@@ -216,8 +231,12 @@ export async function submitArtifactRun(
   // Refuse a busy fail-fast submit at once instead of after a guard check.
   const refused = failFastRefusal(options.queue)
   if (refused) return refused
-  const blocked = await checkRunPrompt(payload)
-  if (blocked) return blocked
+  const blocked = await checkRunPrompt(payload, options.queue === 'queue')
+  if (blocked) {
+    // The release this check was holding off has nothing left to wait for.
+    if (options.queue === 'queue') void drainQueue()
+    return blocked
+  }
   return admitRun(payload, options.queue)
 }
 
@@ -233,9 +252,16 @@ function failFastRefusal(queue: 'fail-fast' | 'queue'): ArtifactRunResult | null
 }
 
 /** Resolves to the run's result when it must not go on (blocked or cancelled), else null. */
-async function checkRunPrompt(payload: ArtifactRunPayload): Promise<ArtifactRunResult | null> {
+async function checkRunPrompt(
+  payload: ArtifactRunPayload,
+  queued: boolean,
+): Promise<ArtifactRunResult | null> {
   const cancel = new AbortController()
-  checkCancels.set(payload.runId, { controller: cancel, panel: payload.owner?.kind === 'panel' })
+  checkCancels.set(payload.runId, {
+    controller: cancel,
+    panel: payload.owner?.kind === 'panel',
+    queued,
+  })
   let verdict: { blocked: boolean; message?: string } | null
   try {
     // Unwired, nothing is marked checked and the runner refuses the run.
@@ -627,6 +653,11 @@ async function waitForUnrelatedTextIdle(
 async function considerRelease(): Promise<void> {
   if (gpuWindow !== 'media') return
   if (runQueue.length > 0) return
+  // A queue-lane run still being judged will park here next; swapping back for
+  // it would cost a stop and a reload per sprite. Unless something is waiting
+  // for the chat window — the check itself, on hardware whose guard cannot run
+  // beside an image run — in which case the swap is what unblocks it.
+  if (queuedChecksPending() > 0 && chatWindowWaiters === 0) return
   if (!orchestratorDeps) return
   const deps = orchestratorDeps
   gpuWindow = 'chat'
@@ -658,9 +689,16 @@ async function considerRelease(): Promise<void> {
  * No proceed-anyway bound: abort the signal (cancel the turn) to give up.
  */
 export async function awaitChatWindow(signal?: AbortSignal): Promise<void> {
-  while (gpuWindow === 'media' || swapBackInFlight) {
-    if (signal?.aborted) throw cancelledChatWindow()
-    await delay(500, signal)
+  chatWindowWaiters += 1
+  try {
+    // A release held off for a pending check is due now that someone needs the window.
+    if (gpuWindow === 'media' && !swapBackInFlight && !queueBusy()) void considerRelease()
+    while (gpuWindow === 'media' || swapBackInFlight) {
+      if (signal?.aborted) throw cancelledChatWindow()
+      await delay(500, signal)
+    }
+  } finally {
+    chatWindowWaiters -= 1
   }
 }
 

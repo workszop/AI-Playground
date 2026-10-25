@@ -442,6 +442,7 @@ export class LlamaCppBackendService implements ApiService {
   private llamaEmbeddingProcess: LlamaServerProcess | null = null
   private llamaGuardProcess: LlamaServerProcess | null = null
   private guardServerStarting: Promise<LlamaServerProcess> | null = null
+  private guardServerStartingPlacement: GuardPlacement | null = null
   private currentLlmModel: string | null = null
   private currentContextSize: number | null = null
   /** The model's own `llamaCppArgs` the running LLM server was launched with. */
@@ -650,16 +651,25 @@ export class LlamaCppBackendService implements ApiService {
       }
       if (this.guardServerStarting) {
         // A concurrent start may have a different model or placement; re-check after it.
-        // A failed start is that caller's failure to count; this one tries for itself.
+        const startingPlacement = this.guardServerStartingPlacement
         const joined = await this.guardServerStarting.catch(() => null)
         if (matches(joined)) return `http://127.0.0.1:${joined.port}`
+        // The same placement just failed: repeating it would only stall every joiner in
+        // turn, so fail now, marked so the failure is counted once, by the caller that started it.
+        if (!joined && startingPlacement && sameGuardPlacement(startingPlacement, placement)) {
+          throw Object.assign(new Error('The guard server failed to start'), {
+            name: 'GuardStartJoinedError',
+          })
+        }
         continue
       }
+      this.guardServerStartingPlacement = placement
       this.guardServerStarting = (async () => {
         await this.stopGuardServer()
         return this.startLlamaGuardServer(modelPath, placement)
       })().finally(() => {
         this.guardServerStarting = null
+        this.guardServerStartingPlacement = null
       })
       const started = await this.guardServerStarting
       return `http://127.0.0.1:${started.port}`

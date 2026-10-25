@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "将其设置为您希望从该提示词生成的图像数量",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "添加词语和描述，以引导图像生成时不应生成哪些内容",
   "SETTINGS_IMAGE_INFO_SEED": "在此处复制粘贴先前生成图像的种子编号，以重新生成该图像。若希望图像随机而非确定性生成，请清空此项。点击骰子可生成随机种子编号。如果批次数量大于 1 并输入了种子，则后续图像将从该种子编号开始依次生成。",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "如果您想在图像生成过程中隐藏其预览，请关闭此项。",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "调高可增加不当图像被审查的可能性。调低可降低对图像审查的敏感度。",
   "SETTINGS_IMAGE_INFO_COMFYUI": "点击此处启动 ComfyUI 应用程序，您可以在其中创建工作流并直接从该工具生成内容。",
   "MEMORY_ALERT_HIGH_MEMORY": "此功能需要占用较高内存，可能超过 24GB 系统内存或 16GB GPU 内存",

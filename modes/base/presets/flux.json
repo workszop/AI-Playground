@@ -128,14 +128,6 @@
       "defaultValue": 0.6,
       "displayed": false,
       "modifiable": false
-    },
-    {
-      "type": "boolean",
-      "label": "Show Preview",
-      "displayed": false,
-      "modifiable": false,
-      "defaultValue": false,
-      "settingName": "showPreview"
     }
   ],
   "comfyUiApiWorkflow": {

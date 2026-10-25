@@ -58,14 +58,6 @@
       "settingName": "seed"
     },
     {
-      "type": "boolean",
-      "label": "Show Preview",
-      "displayed": false,
-      "modifiable": false,
-      "defaultValue": false,
-      "settingName": "showPreview"
-    },
-    {
       "type": "number",
       "label": "Inference Steps",
       "displayed": true,

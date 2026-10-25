@@ -32,8 +32,6 @@ export type GenerationSettings = Partial<{
   batchSize: number
   negativePrompt: string
   safetyCheck: boolean
-  /** Older gallery records only: the live preview was removed from the kids-safe build. */
-  showPreview?: boolean
 }>
 
 export type ComfyDynamicInputWithCurrent = ComfyInput & { current: string | number | boolean }

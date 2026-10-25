@@ -155,9 +155,10 @@ describe('helpers', () => {
         images: [{ url: 'aipg-media://x.png', data: 'data:image/png;base64,AAAA' }],
         links: [{ href: 'https://example.com/a?b=c', text: 'Pierwsza' }],
         pages: [{ body: 'Druga', url: 'http://example.org' }],
+        source: 'https://example.com\n\nTrzecia ze strony',
         count: 3,
       }),
-    ).toBe('Gotowe\nPierwsza\nDruga')
+    ).toBe('Gotowe\nPierwsza\nDruga\nhttps://example.com\n\nTrzecia ze strony')
     expect(toolOutputText('tekst')).toBe('tekst')
     expect(toolOutputText(null)).toBe('')
   })
@@ -448,6 +449,17 @@ describe('guard placement fallback', () => {
       'gpu',
       'cpu',
     ])
+  })
+
+  it('does not count a start another check made and lost', async () => {
+    const ensure = vi.fn(async (_path: string, used: GuardPlacement) => {
+      if (used === GPU_4B)
+        throw Object.assign(new Error('joined'), { name: 'GuardStartJoinedError' })
+      return 'http://127.0.0.1:39300'
+    })
+    const deps = wire({ chat: [GPU_4B, CPU_4B], media: [] }, { ensureGuardServer: ensure })
+    for (let i = 0; i < 3; i++) expect((await checkKidsPrompt(`kot ${i}`)).level).toBe('safe')
+    expect(startedPlacements(deps)).toEqual([GPU_4B, CPU_4B, GPU_4B, CPU_4B, GPU_4B, CPU_4B])
   })
 
   it('blocks as unavailable when every placement fails', async () => {

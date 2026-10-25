@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "Bunu istemden oluşturulmasını istediğiniz görsel sayısına ayarlayın",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "Görsel oluşturmayı NELERİN oluşturulmaması konusunda yönlendirmek için terimler ve açıklamalar ekleyin",
   "SETTINGS_IMAGE_INFO_SEED": "O görseli yeniden oluşturmak için daha önce oluşturulmuş bir görselden bir tohum numarasını buraya kopyalayıp yapıştırın. Görsellerin rastgele ve deterministik olmayan olmasını istiyorsanız temizleyin. Rastgele bir tohum numarası oluşturmak için zara tıklayın. Toplu iş sayısı 1'den fazlaysa ve bir tohum girilmişse, sonraki görseller tohum numarasından sırayla oluşturulur",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "Görsel oluşturulurken önizlemesini gizlemek istiyorsanız kapatın.",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "Uygunsuz görsellerin sansürlenme olasılığını artırmak için yukarı ayarlayın. Görsellerin sansürlenme hassasiyetini azaltmak için aşağı ayarlayın",
   "SETTINGS_IMAGE_INFO_COMFYUI": "İş akışları oluşturabileceğiniz ve doğrudan o araçtan içerik üretebileceğiniz ComfyUI uygulamasını başlatmak için buna tıklayın",
   "MEMORY_ALERT_HIGH_MEMORY": "Bu özellik yüksek bellek kullanımı gerektirir ve 24 GB sistem belleğini veya 16 GB GPU belleğini aşabilir",

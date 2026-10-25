@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "Imposta questo valore sul numero di immagini che vuoi generare dal prompt",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "Aggiungi termini e descrizioni per indicare alla generazione dell'immagine cosa NON generare",
   "SETTINGS_IMAGE_INFO_SEED": "Copia e incolla qui il seed di un'immagine generata in precedenza per ricrearla. Cancella il campo se vuoi che le immagini siano casuali e non deterministiche. Clicca sul dado per generare un numero di seed casuale. Se il numero di batch è superiore a 1 e viene inserito un seed, le immagini successive verranno generate in sequenza a partire dal numero di seed",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "Disattiva se vuoi nascondere l'anteprima dell'immagine mentre viene generata.",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "Aumenta il valore per incrementare la probabilità che le immagini inappropriate vengano censurate. Diminuiscilo per ridurre la sensibilità alla censura delle immagini",
   "SETTINGS_IMAGE_INFO_COMFYUI": "Clicca qui per avviare l'applicazione ComfyUI, dove puoi creare workflow e generare contenuti direttamente da quello strumento",
   "MEMORY_ALERT_HIGH_MEMORY": "Questa funzione richiede un elevato utilizzo di memoria e può superare i 24 GB di memoria di sistema o i 16 GB di memoria GPU",

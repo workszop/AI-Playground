@@ -155,30 +155,6 @@
           ></random-number>
         </div>
 
-        <div
-          v-if="modifiableOrDisplayed('showPreview')"
-          class="grid grid-cols-[120px_1fr] items-center gap-4"
-        >
-          <div class="flex items-center justify-between gap-2 min-w-0 w-[120px]">
-            <Label class="whitespace-nowrap truncate min-w-0">
-              {{ languages.SETTINGS_MODEL_SHOW_PREVIEW || 'Show Preview' }}
-            </Label>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <span class="svg-icon i-info w-4 h-4 shrink-0 opacity-50 cursor-help" />
-              </TooltipTrigger>
-              <TooltipContent side="right" class="max-w-[300px] text-sm text-justify">
-                {{ languages.SETTINGS_IMAGE_INFO_SHOW_PREVIEW }}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <Checkbox
-            :model-value="imageGeneration.showPreview"
-            :disabled="!modifiable('showPreview')"
-            @update:model-value="(value) => (imageGeneration.showPreview = value === true)"
-          />
-        </div>
-
         <ComfyDynamic></ComfyDynamic>
 
         <div class="border-t border-border items-center flex-wrap grid grid-cols-1 gap-2">
@@ -212,7 +188,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'

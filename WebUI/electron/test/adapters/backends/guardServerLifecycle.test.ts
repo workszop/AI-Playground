@@ -166,7 +166,25 @@ describe('guard server lifecycle', () => {
     expect(mocks.terminateProcessTree).not.toHaveBeenCalled()
   })
 
-  it('a check that joined a failed start tries its own start instead of failing with it', async () => {
+  it('a check that joined a failed start of its own placement fails with a marked error', async () => {
+    const service = guardService()
+    service.isSetUp = true
+    const first = deferredStart()
+    const starts = vi
+      .spyOn(service, 'startLlamaGuardServer')
+      .mockImplementationOnce(() => first.promise)
+
+    const a = service.ensureGuardServer('/m/guard.gguf', CPU_GUARD)
+    const b = service.ensureGuardServer('/m/guard.gguf', CPU_GUARD)
+    await Promise.resolve()
+    first.reject(new Error('out of memory'))
+
+    await expect(a).rejects.toThrow('out of memory')
+    await expect(b).rejects.toMatchObject({ name: 'GuardStartJoinedError' })
+    expect(starts).toHaveBeenCalledTimes(1)
+  })
+
+  it('a check that joined a failed start of another placement tries its own', async () => {
     const service = guardService()
     service.isSetUp = true
     const first = deferredStart()
@@ -178,7 +196,7 @@ describe('guard server lifecycle', () => {
         return service.llamaGuardProcess as { isReady: boolean }
       })
 
-    const a = service.ensureGuardServer('/m/guard.gguf', CPU_GUARD)
+    const a = service.ensureGuardServer('/m/guard.gguf', { ...CPU_GUARD, threads: 8 })
     const b = service.ensureGuardServer('/m/guard.gguf', CPU_GUARD)
     await Promise.resolve()
     first.reject(new Error('out of memory'))

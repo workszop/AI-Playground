@@ -94,7 +94,7 @@ const admittedCancels = new Map<string, AbortController>()
 // Runs whose prompt is being checked (cancellable), and runs whose prompt passed; the runner refuses any other.
 const checkCancels = new Map<
   string,
-  { controller: AbortController; panel: boolean; queued: boolean }
+  { controller: AbortController; panel: boolean; queued: boolean; conversationKey?: string }
 >()
 /** Callers parked in awaitChatWindow; a pending check must not keep the window from them. */
 let chatWindowWaiters = 0
@@ -162,13 +162,16 @@ export function artifactRunsQueued(): number {
   return runQueue.length
 }
 
-/** Queue-lane runs still in their prompt check: they will park behind the active run. */
-function queuedChecksPending(): number {
-  let count = 0
+/**
+ * Whether a queue-lane run still in its prompt check is about to park behind
+ * the active run, with no other local chat turn needing the backend meanwhile:
+ * a live turn in another conversation fires its next model call regardless.
+ */
+function queuedCheckHoldsWindow(): boolean {
   for (const check of checkCancels.values()) {
-    if (check.queued) count += 1
+    if (check.queued && !unrelatedLocalTextOpen(check.conversationKey)) return true
   }
-  return count
+  return false
 }
 
 /** Admitted, executing, or queued — close policy and fail-fast both ask. */
@@ -261,6 +264,7 @@ async function checkRunPrompt(
     controller: cancel,
     panel: payload.owner?.kind === 'panel',
     queued,
+    conversationKey: payload.conversationKey,
   })
   let verdict: { blocked: boolean; message?: string } | null
   try {
@@ -656,9 +660,9 @@ async function considerRelease(): Promise<void> {
   if (runQueue.length > 0) return
   // A queue-lane run still being judged will park here next; swapping back for
   // it would cost a stop and a reload per sprite. Unless something is waiting
-  // for the chat window — the check itself, on hardware whose guard cannot run
-  // beside an image run — in which case the swap is what unblocks it.
-  if (queuedChecksPending() > 0 && chatWindowWaiters === 0) return
+  // for the chat window (the check itself, on hardware whose guard cannot run
+  // beside an image run), in which case the swap is what unblocks it.
+  if (queuedCheckHoldsWindow() && chatWindowWaiters === 0) return
   if (!orchestratorDeps) return
   const deps = orchestratorDeps
   gpuWindow = 'chat'

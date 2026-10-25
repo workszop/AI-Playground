@@ -88,7 +88,6 @@ const generalDefaultSettings = {
   prompt: '',
   seed: -1,
   safetyCheck: true,
-  showPreview: false,
 }
 
 export const backendToService: Record<'comfyui', BackendServiceName> = {
@@ -134,14 +133,12 @@ export const useImageGenerationPresets = defineStore('imageGenerationPresets', (
   const prompt = ref<string>(generalDefaultSettings.prompt)
   const seed = ref<number>(generalDefaultSettings.seed)
   const safetyCheck = ref<boolean>(generalDefaultSettings.safetyCheck)
-  const showPreview = ref<boolean>(generalDefaultSettings.showPreview)
   const batchSize = ref<number>(globalDefaultSettings.batchSize)
 
   const resetActivePresetSettings = () => {
     prompt.value = generalDefaultSettings.prompt
     seed.value = generalDefaultSettings.seed
     safetyCheck.value = generalDefaultSettings.safetyCheck
-    showPreview.value = generalDefaultSettings.showPreview
     const settingsKey = getSettingsKey()
     if (settingsKey) {
       settingsPerPreset.value[settingsKey] = {}
@@ -191,7 +188,6 @@ export const useImageGenerationPresets = defineStore('imageGenerationPresets', (
     batchSize,
     negativePrompt,
     safetyCheck,
-    showPreview,
   }
 
   const backend = computed(() => {
@@ -478,7 +474,6 @@ export const useImageGenerationPresets = defineStore('imageGenerationPresets', (
     saveToSettingsPerPreset('batchSize')
     saveToSettingsPerPreset('negativePrompt')
     saveToSettingsPerPreset('safetyCheck')
-    saveToSettingsPerPreset('showPreview')
   })
 
   const generatedImages = ref<MediaItem[]>([])
@@ -791,7 +786,6 @@ export const useImageGenerationPresets = defineStore('imageGenerationPresets', (
     negativePrompt.value =
       getSavedOrDefault('negativePrompt') ?? globalDefaultSettings.negativePrompt
     safetyCheck.value = getSavedOrDefault('safetyCheck') ?? generalDefaultSettings.safetyCheck
-    showPreview.value = getSavedOrDefault('showPreview') ?? generalDefaultSettings.showPreview
 
     syncSelectedReferenceImage()
 
@@ -1263,7 +1257,6 @@ export const useImageGenerationPresets = defineStore('imageGenerationPresets', (
     failGeneration,
     cancelGeneration,
     safetyCheck,
-    showPreview,
     inferenceSteps,
     seed,
     width,

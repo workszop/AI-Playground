@@ -26,7 +26,6 @@ const StandardSettingNameSchema = z.enum([
   'batchSize',
   'negativePrompt',
   'safetyCheck',
-  'showPreview',
 ])
 
 // Base Setting Schema - can be either a standard setting or a generic setting

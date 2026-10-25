@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "Đặt số ảnh bạn muốn tạo từ câu lệnh",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "Thêm các từ và mô tả để hướng dẫn việc tạo ảnh về những gì KHÔNG nên tạo",
   "SETTINGS_IMAGE_INFO_SEED": "Sao chép và dán số seed từ ảnh đã tạo trước đó vào đây để tái tạo lại ảnh đó. Xóa đi nếu bạn muốn ảnh ngẫu nhiên và không xác định. Nhấp vào con xúc xắc để tạo số seed ngẫu nhiên. Nếu số lượng lô lớn hơn 1 và có nhập seed, thì các ảnh tiếp theo sẽ được tạo tuần tự từ số seed đó",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "Tắt nếu bạn muốn ẩn bản xem trước của ảnh trong khi đang tạo.",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "Điều chỉnh tăng để tăng khả năng kiểm duyệt các ảnh không phù hợp. Điều chỉnh giảm để giảm độ nhạy trong việc kiểm duyệt ảnh",
   "SETTINGS_IMAGE_INFO_COMFYUI": "Nhấp vào đây để khởi chạy ứng dụng ComfyUI, nơi bạn có thể tạo quy trình và tạo nội dung trực tiếp từ công cụ đó",
   "MEMORY_ALERT_HIGH_MEMORY": "Tính năng này yêu cầu sử dụng bộ nhớ cao và có thể vượt quá 24 GB bộ nhớ hệ thống hoặc 16 GB bộ nhớ GPU",

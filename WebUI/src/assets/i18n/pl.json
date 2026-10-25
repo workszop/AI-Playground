@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "Ustaw liczbę obrazów, które chcesz wygenerować na podstawie polecenia",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "Dodaj terminy i opisy, aby wskazać generowaniu obrazu, czego NIE generować",
   "SETTINGS_IMAGE_INFO_SEED": "Skopiuj i wklej tutaj numer ziarna z wcześniej wygenerowanego obrazu, aby odtworzyć ten obraz. Wyczyść, jeśli chcesz, aby obrazy były losowe, a nie deterministyczne. Kliknij kostkę, aby wygenerować losowy numer ziarna. Jeśli liczba partii jest większa niż 1 i wprowadzono ziarno, kolejne obrazy będą generowane sekwencyjnie od numeru ziarna",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "Wyłącz, jeśli chcesz ukryć podgląd obrazu podczas jego generowania.",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "Zwiększ, aby podnieść prawdopodobieństwo cenzurowania nieodpowiednich obrazów. Zmniejsz, aby obniżyć czułość cenzurowania obrazów",
   "SETTINGS_IMAGE_INFO_COMFYUI": "Kliknij, aby uruchomić aplikację ComfyUI, w której możesz tworzyć procesy robocze i generować treści bezpośrednio z tego narzędzia",
   "MEMORY_ALERT_HIGH_MEMORY": "Ta funkcja wymaga dużego zużycia pamięci i może przekroczyć 24 GB pamięci systemowej lub 16 GB pamięci GPU",

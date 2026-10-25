@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "Setel ini ke jumlah gambar yang ingin Anda buat dari prompt",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "Tambahkan istilah dan deskripsi untuk memandu pembuatan gambar mengenai apa yang TIDAK boleh dibuat",
   "SETTINGS_IMAGE_INFO_SEED": "Salin dan tempel nomor seed di sini dari gambar yang dibuat sebelumnya untuk membuat ulang gambar tersebut. Kosongkan jika Anda ingin gambar acak dan tidak deterministik. Klik dadu untuk membuat nomor seed acak. Jika jumlah batch lebih dari 1 dan seed dimasukkan, maka gambar berikutnya akan dibuat secara berurutan dari nomor seed",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "Matikan jika Anda ingin menyembunyikan pratinjau gambar saat sedang dibuat.",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "Naikkan untuk meningkatkan kemungkinan gambar yang tidak pantas disensor. Turunkan untuk mengurangi sensitivitas penyensoran gambar",
   "SETTINGS_IMAGE_INFO_COMFYUI": "Klik ini untuk meluncurkan aplikasi ComfyUI, tempat Anda dapat membuat workflow dan menghasilkan konten langsung dari alat tersebut",
   "MEMORY_ALERT_HIGH_MEMORY": "Fitur ini memerlukan penggunaan memori tinggi dan dapat melebihi 24GB memori sistem atau 16GB memori GPU",

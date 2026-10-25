@@ -486,7 +486,9 @@ async function judgeWithFallback(
         index = -1
         continue
       }
-      if (!interrupted && !lastResort) {
+      // A start another check made and lost is counted by that check, not again here.
+      const joinedStart = error instanceof Error && error.name === 'GuardStartJoinedError'
+      if (!interrupted && !lastResort && !joinedStart) {
         placementFailures.set(key, (placementFailures.get(key) ?? 0) + 1)
       }
     }
@@ -556,16 +558,17 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-// Media payloads and links: shown on the card, but not text the guard can judge.
+// A bare media payload or link: shown on the card, but not text the guard can judge.
 const SKIPPED_TOOL_OUTPUT_PREFIXES = ['data:', 'aipg-media://', 'http://', 'https://']
+const isBareReference = (value: string) =>
+  /^\S+$/.test(value) && SKIPPED_TOOL_OUTPUT_PREFIXES.some((prefix) => value.startsWith(prefix))
 
-/** The text a tool output would show on screen: every string in it except media payloads and URLs. */
+/** The text a tool output would show on screen: every string in it that is more than a bare URL or media payload. */
 export function toolOutputText(output: unknown): string {
   const texts: string[] = []
   const visit = (value: unknown) => {
     if (typeof value === 'string') {
-      if (!SKIPPED_TOOL_OUTPUT_PREFIXES.some((prefix) => value.startsWith(prefix)))
-        texts.push(value)
+      if (!isBareReference(value)) texts.push(value)
     } else if (Array.isArray(value)) {
       value.forEach(visit)
     } else if (typeof value === 'object' && value !== null) {

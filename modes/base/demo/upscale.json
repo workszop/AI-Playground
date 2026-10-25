@@ -165,14 +165,6 @@
       "settingName": "batchSize"
     },
     {
-      "type": "boolean",
-      "label": "Show Preview",
-      "displayed": false,
-      "modifiable": false,
-      "defaultValue": false,
-      "settingName": "showPreview"
-    },
-    {
       "type": "image",
       "label": "Input Image",
       "displayed": true,

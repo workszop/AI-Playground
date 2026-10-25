@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "Legen Sie hier die Anzahl der Bilder fest, die aus dem Prompt erzeugt werden sollen",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "Fügen Sie Begriffe und Beschreibungen hinzu, um die Bilderzeugung dahingehend zu steuern, was NICHT erzeugt werden soll",
   "SETTINGS_IMAGE_INFO_SEED": "Kopieren Sie hier eine Seed-Nummer eines zuvor erzeugten Bildes ein, um dieses Bild neu zu erstellen. Leeren Sie das Feld, wenn die Bilder zufällig und nicht deterministisch sein sollen. Klicken Sie auf den Würfel, um eine zufällige Seed-Nummer zu erzeugen. Wenn die Batch-Anzahl größer als 1 ist und ein Seed eingegeben wurde, werden die nachfolgenden Bilder sequenziell ausgehend von der Seed-Nummer erzeugt",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "Deaktivieren Sie dies, wenn Sie eine Vorschau des Bildes während der Erzeugung ausblenden möchten.",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "Erhöhen Sie den Wert, um die Wahrscheinlichkeit zu steigern, dass unangemessene Bilder zensiert werden. Verringern Sie ihn, um die Empfindlichkeit der Bildzensur zu reduzieren",
   "SETTINGS_IMAGE_INFO_COMFYUI": "Klicken Sie hier, um die ComfyUI-Anwendung zu starten, in der Sie Workflows erstellen und Inhalte direkt aus diesem Tool erzeugen können",
   "MEMORY_ALERT_HIGH_MEMORY": "Diese Funktion erfordert einen hohen Speicherbedarf und kann 24 GB Arbeitsspeicher oder 16 GB GPU-Speicher überschreiten",

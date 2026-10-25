@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "Establece aquí el número de imágenes que quieres generar a partir de la indicación",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "Añade términos y descripciones para orientar la generación de imágenes sobre lo que NO se debe generar",
   "SETTINGS_IMAGE_INFO_SEED": "Copia y pega aquí el número de semilla de una imagen generada anteriormente para recrear esa imagen. Bórralo si quieres que las imágenes sean aleatorias y no deterministas. Haz clic en el dado para generar un número de semilla aleatorio. Si el número de lotes es superior a 1 y se introduce una semilla, las imágenes posteriores se generarán de forma secuencial a partir del número de semilla",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "Desactívalo si quieres ocultar una vista previa de la imagen mientras se genera.",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "Auméntalo para incrementar la probabilidad de que las imágenes inapropiadas sean censuradas. Disminúyelo para reducir la sensibilidad de la censura de imágenes",
   "SETTINGS_IMAGE_INFO_COMFYUI": "Haz clic aquí para iniciar la aplicación ComfyUI, donde puedes crear flujos de trabajo y generar contenido directamente desde esa herramienta",
   "MEMORY_ALERT_HIGH_MEMORY": "Esta función requiere un uso elevado de memoria y puede superar los 24 GB de memoria del sistema o los 16 GB de memoria de la GPU",

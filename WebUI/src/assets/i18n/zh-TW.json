@@ -323,7 +323,6 @@
   "SETTINGS_IMAGE_INFO_BATCH_COUNT": "將此設為您希望從提示詞生成的圖片數量",
   "SETTINGS_IMAGE_INFO_NEGATIVE_PROMPT": "加入詞彙與描述，以引導圖片生成不要生成的內容",
   "SETTINGS_IMAGE_INFO_SEED": "從先前生成的圖片複製並貼上種子編號至此處，以重新建立該圖片。若希望圖片隨機且非確定性，請清空。點擊骰子以生成隨機種子編號。若批次數量大於 1 且已輸入種子，則後續圖片將從該種子編號依序生成",
-  "SETTINGS_IMAGE_INFO_SHOW_PREVIEW": "若您想隱藏圖片生成過程中的預覽，請關閉此項。",
   "SETTINGS_IMAGE_INFO_SAFETY_CHECKER": "調高以增加不當圖片被審查的可能性。調低以降低圖片審查的敏感度",
   "SETTINGS_IMAGE_INFO_COMFYUI": "點擊此處以啟動 ComfyUI 應用程式，您可以在其中建立工作流程並直接從該工具生成內容",
   "MEMORY_ALERT_HIGH_MEMORY": "此功能需要大量記憶體使用，可能超過 24GB 系統記憶體或 16GB GPU 記憶體",

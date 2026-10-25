@@ -312,6 +312,39 @@ describe('the orchestrator', () => {
     await queued
   })
 
+  it('a pending queued check from another conversation does not hold the GPU from a live local turn', async () => {
+    const check = deferred()
+    const d = deps({
+      checkPrompt: vi
+        .fn()
+        .mockResolvedValueOnce({ blocked: false })
+        .mockImplementationOnce(() => check.promise),
+    })
+    setOrchestratorDeps(d)
+    await submitTextRequest({ runId: 'turn-1', conversationKey: 'c1', needsGpu: true })
+    const holdOne = holdNextRun()
+    const nested = submitArtifactRun(payload({ runId: 'nested-1', conversationKey: 'c1' }), {
+      queue: 'queue',
+    })
+    await vi.waitFor(() => expect(activeRunId).toBe('nested-1'))
+    const holdTwo = holdNextRun()
+    const other = submitArtifactRun(payload({ runId: 'run-2', conversationKey: 'c2' }), {
+      queue: 'queue',
+    })
+    await vi.waitFor(() => expect(d.checkPrompt).toHaveBeenCalledTimes(2))
+
+    // c1's next model step needs the chat backend back; c2's check must not keep it stopped.
+    holdOne.resolve({ state: 'completed', items: [] })
+    await nested
+    await vi.waitFor(() => expect(d.restartChatBackend).toHaveBeenCalledTimes(1))
+
+    check.resolve({ blocked: false })
+    finishTextRequest('turn-1')
+    await vi.waitFor(() => expect(activeRunId).toBe('run-2'))
+    holdTwo.resolve({ state: 'completed', items: [] })
+    await other
+  })
+
   it('does not admit a GPU chat turn while stopChatForMedia is in flight', async () => {
     const stop = deferred()
     const d = deps({ stopChatForMedia: vi.fn(() => stop.promise as Promise<void>) })

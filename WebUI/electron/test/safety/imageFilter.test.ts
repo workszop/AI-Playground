@@ -74,6 +74,13 @@ describe('imageFilterProblem', () => {
     expect(imageFilterProblem(wf, 'image')).toMatch(/PreviewImage node 5 is not fed/)
   })
 
+  it('refuses a saver that also passes its images onward', () => {
+    const wf = workflow(0.4)
+    wf['5'] = { class_type: 'Image Save', inputs: { images: ['1', 0] } } as never
+    wf['6'] = { class_type: 'ImageInvert', inputs: { images: ['5', 0] } } as never
+    expect(imageFilterProblem(wf, 'image')).toMatch(/Image Save node 5 is not fed/)
+  })
+
   it('allows an unfiltered image to feed another node on its way to the checker', () => {
     const wf = workflow(0.4)
     wf['1'] = { class_type: 'VAEDecode', inputs: {} } as never

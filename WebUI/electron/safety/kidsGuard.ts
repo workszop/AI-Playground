@@ -50,6 +50,11 @@ export const KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE =
   'Wynik tego narzędzia został ukryty ze względów bezpieczeństwa.\n\n' +
   'This tool result was hidden for safety reasons.'
 
+/** Shown on a tool card whose result was still being checked when the user pressed Stop. */
+export const KIDS_TOOL_OUTPUT_STOPPED_MESSAGE =
+  'Sprawdzanie wyniku tego narzędzia zostało przerwane.\n\n' +
+  'Checking this tool result was stopped.'
+
 /** Agent turns stream outside the chat guard, so the kids-safe build keeps them off. */
 export const KIDS_SAFE_AGENT_MODE_DISABLED = true
 
@@ -510,7 +515,11 @@ async function judge(
     return verdict
   } catch (error) {
     // The caller's own Stop is not a guard failure: let it end the turn instead of blocking it.
-    if (signal?.aborted) throw error
+    if (signal?.aborted) {
+      throw isAbortError(error)
+        ? error
+        : new DOMException('Kids guard check cancelled', 'AbortError')
+    }
     const detail = errorDetail(error)
     appLogger.warn(`Kids guard unavailable, blocking: ${detail}`, 'kids-guard')
     return { level: 'unavailable', detail }
@@ -563,7 +572,7 @@ const SKIPPED_TOOL_OUTPUT_PREFIXES = ['data:', 'aipg-media://', 'http://', 'http
 const isBareReference = (value: string) =>
   /^\S+$/.test(value) && SKIPPED_TOOL_OUTPUT_PREFIXES.some((prefix) => value.startsWith(prefix))
 
-/** The text a tool output would show on screen: every string in it that is more than a bare URL or media payload. */
+/** The text a tool input or output would show on screen: every string in it that is more than a bare URL or media payload. */
 export function toolOutputText(output: unknown): string {
   const texts: string[] = []
   const visit = (value: unknown) => {
@@ -647,6 +656,8 @@ export function guardUiMessageStream(
   return new ReadableStream<UIMessageChunk>({
     async start(controller) {
       const openText = new Set<string>()
+      const heldToolInput = new Map<string, UIMessageChunk[]>()
+      let checkingTool: string | undefined
       let held: UIMessageChunk[] = []
       let piece = ''
       let shown = ''
@@ -700,6 +711,19 @@ export function guardUiMessageStream(
           }
           // Anything else (text end, tool activity, step and finish markers) closes the piece.
           if (!(await settlePiece())) return
+          if (chunk.type === 'tool-input-start' || chunk.type === 'tool-input-delta') {
+            // The call is shown only once its complete input has been judged.
+            heldToolInput.set(chunk.toolCallId, [
+              ...(heldToolInput.get(chunk.toolCallId) ?? []),
+              chunk,
+            ])
+            continue
+          }
+          if (chunk.type === 'tool-input-available' || chunk.type === 'tool-input-error') {
+            if (!(await passes(toolOutputText(chunk.input)))) return
+            heldToolInput.get(chunk.toolCallId)?.forEach(emit)
+            heldToolInput.delete(chunk.toolCallId)
+          }
           if (chunk.type === 'tool-output-available') {
             const explainOnCard = () =>
               controller.enqueue({
@@ -707,7 +731,9 @@ export function guardUiMessageStream(
                 toolCallId: chunk.toolCallId,
                 errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
               })
+            checkingTool = chunk.toolCallId
             if (!(await passes(toolOutputText(chunk.output), explainOnCard))) return
+            checkingTool = undefined
           }
           emit(chunk)
         }
@@ -720,6 +746,13 @@ export function guardUiMessageStream(
         }
         // The caller's Stop: what was shown stays, the unjudged tail is dropped.
         for (const id of openText) controller.enqueue({ type: 'text-end', id })
+        if (checkingTool !== undefined) {
+          controller.enqueue({
+            type: 'tool-output-error',
+            toolCallId: checkingTool,
+            errorText: KIDS_TOOL_OUTPUT_STOPPED_MESSAGE,
+          })
+        }
         controller.enqueue({ type: 'finish' })
         controller.close()
         return

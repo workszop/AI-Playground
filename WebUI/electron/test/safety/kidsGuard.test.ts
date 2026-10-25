@@ -20,6 +20,7 @@ import {
   KIDS_GUARD_SMALL_MODEL_FILE,
   KIDS_GUARD_SMALL_MODEL_REPO,
   KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
+  KIDS_TOOL_OUTPUT_STOPPED_MESSAGE,
   buildGuardPrompt,
   checkKidsPrompt,
   checkKidsResponse,
@@ -631,6 +632,24 @@ describe('guard placement fallback', () => {
     expect(startedPlacements(deps)).toEqual([GPU_4B])
   })
 
+  it('ends as a cancellation when Stop arrives while waiting for the window', async () => {
+    const controller = new AbortController()
+    const deps = wire(
+      { chat: [GPU_4B], media: [] },
+      {
+        mediaWindowActive: () => true,
+        awaitChatWindow: vi.fn(async () => {
+          controller.abort()
+          throw new Error('Cancelled while waiting for the chat GPU window.')
+        }),
+      },
+    )
+    await expect(checkKidsPrompt('kot', controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(deps.ensureGuardServer).not.toHaveBeenCalled()
+  })
+
   it('plans again when the window flips before the guard starts', async () => {
     let windowReads = 0
     const deps = wire(
@@ -952,6 +971,104 @@ describe('guardUiMessageStream', () => {
     expect(message?.parts.find((p) => p.type.startsWith('tool-'))).toMatchObject({
       state: 'output-error',
       errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
+    })
+  })
+
+  it('judges a tool input before showing the call', async () => {
+    const check = vi.fn(async () => ({ level: 'safe' as const }))
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'tool-input-start', toolCallId: 'c1', toolName: 'web' },
+          { type: 'tool-input-delta', toolCallId: 'c1', inputTextDelta: '{"query":"smoki"}' },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'c1',
+            toolName: 'web',
+            input: { query: 'smoki' },
+          },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(check).toHaveBeenCalledWith('smoki')
+    expect(out.map((c) => c.type)).toEqual([
+      'start',
+      'tool-input-start',
+      'tool-input-delta',
+      'tool-input-available',
+      'finish',
+    ])
+  })
+
+  it('never shows a blocked tool input and appends the blocked message', async () => {
+    const check = vi.fn(async () => ({ level: 'unsafe' as const }))
+    const onBlocked = vi.fn()
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'tool-input-start', toolCallId: 'c1', toolName: 'web' },
+          { type: 'tool-input-delta', toolCallId: 'c1', inputTextDelta: '{"query":"zło"}' },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'c1',
+            toolName: 'web',
+            input: { query: 'zło' },
+          },
+          { type: 'tool-output-available', toolCallId: 'c1', output: 'Nie pokazuj.' },
+          { type: 'finish' },
+        ]),
+        check,
+        onBlocked,
+      ),
+    )
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(out.map((c) => c.type)).toEqual([
+      'start',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish',
+    ])
+    expect(onBlocked).toHaveBeenCalledTimes(1)
+    const message = await assemble(out)
+    expect(message?.parts.find((p) => p.type.startsWith('tool-'))).toBeUndefined()
+    expect(message?.parts.filter((p) => p.type === 'text')).toEqual([
+      expect.objectContaining({ text: KIDS_BLOCKED_MESSAGE }),
+    ])
+  })
+
+  it('settles the tool card when Stop arrives while its output is being checked', async () => {
+    const check = vi.fn().mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'tool-input-available', toolCallId: 'c1', toolName: 'web', input: {} },
+          { type: 'tool-output-available', toolCallId: 'c1', output: 'Strona o smokach.' },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(out.map((c) => c.type)).toEqual([
+      'start',
+      'tool-input-available',
+      'tool-output-error',
+      'finish',
+    ])
+    expect(out[2]).toEqual({
+      type: 'tool-output-error',
+      toolCallId: 'c1',
+      errorText: KIDS_TOOL_OUTPUT_STOPPED_MESSAGE,
+    })
+    const message = await assemble(out)
+    expect(message?.parts.find((p) => p.type.startsWith('tool-'))).toMatchObject({
+      state: 'output-error',
+      errorText: KIDS_TOOL_OUTPUT_STOPPED_MESSAGE,
     })
   })
 

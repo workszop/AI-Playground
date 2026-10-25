@@ -71,8 +71,9 @@ export function checkedImageOutputs(workflow: ComfyUIApiWorkflow): Set<string> {
 }
 
 /**
- * Ids of the nodes that write images to disk: every `*SaveImage*`, and in a
- * still-image workflow every node that takes `images` and feeds nothing else
+ * Ids of the nodes that write images to disk: every `*SaveImage*`, every
+ * `*Save*` node that takes `images` (some savers pass them onward too), and in
+ * a still-image workflow every node that takes `images` and feeds nothing else
  * (savers and previews of any class). Video presets are unfiltered by design,
  * and their output node takes the frames as `images`.
  */
@@ -85,8 +86,10 @@ function imageSinks(workflow: ComfyUIApiWorkflow, mediaType: string | undefined)
   }
   const sinks = new Set<string>()
   for (const [id, node] of Object.entries(workflow) as [string, WorkflowNode][]) {
-    const saver = typeof node.class_type === 'string' && node.class_type.includes('SaveImage')
-    const terminalImages = mediaType !== 'video' && isLink(node.inputs?.images) && !consumed.has(id)
+    const className = typeof node.class_type === 'string' ? node.class_type : ''
+    const takesImages = isLink(node.inputs?.images)
+    const saver = className.includes('SaveImage') || (/save/i.test(className) && takesImages)
+    const terminalImages = mediaType !== 'video' && takesImages && !consumed.has(id)
     if (saver || terminalImages) sinks.add(id)
   }
   return sinks

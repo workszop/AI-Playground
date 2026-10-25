@@ -1,13 +1,5 @@
 import { useDialogStore } from '../store/dialogs'
-import { remoteTurnPort } from './remoteTurnPort'
 import { extractMessage, isCancellation } from '../errors/appError'
-
-/**
- * Renderer half of the Permissions prompt adapter (step 13). Main owns grant
- * lookup and skip-confirmation; this module shows the desktop modal, routes a
- * remote turn to the registered Home Agent port, and asks the VRAM warning.
- * `notify` stays local — it is display-only, not a consent decision.
- */
 
 const PING_INTERVAL_MS = 30_000
 
@@ -15,29 +7,42 @@ function respond(payload: import('@/types/permissionsIpc').PermissionsPromptResp
   void window.electronAPI.permissions.respond(payload)
 }
 
+type ActivePrompt = {
+  controller: AbortController
+  cancel?: () => void
+}
+
+const activePrompts = new Map<string, ActivePrompt>()
+
 async function handlePrompt(
   request: import('@/types/permissionsIpc').PermissionsPromptPayload,
 ): Promise<void> {
+  const prompt: ActivePrompt = { controller: new AbortController() }
+  activePrompts.set(request.requestId, prompt)
   const pings = setInterval(
     () => respond({ requestId: request.requestId, progress: true }),
     PING_INTERVAL_MS,
   )
   try {
     switch (request.kind) {
-      case 'is-remote': {
-        respond({ requestId: request.requestId, result: remoteTurnPort().isActive() })
-        break
-      }
       case 'download': {
         const models = request.models as DownloadModelParam[]
-        if (remoteTurnPort().isActive()) {
-          await remoteTurnPort().downloadModels(models, {
-            skipConfirmation: request.skipConfirmation,
+        const dialogStore = useDialogStore()
+        prompt.cancel = () => {
+          dialogStore.cancelDownloadDialog?.(request.requestId)
+        }
+        await new Promise<void>((resolve, reject) => {
+          dialogStore.showDownloadDialog(models, resolve, reject, {
+            requestId: request.requestId,
           })
-        } else {
-          await new Promise<void>((resolve, reject) => {
-            useDialogStore().showDownloadDialog(models, resolve, reject)
+        })
+        if (prompt.controller.signal.aborted) {
+          respond({
+            requestId: request.requestId,
+            error: 'Permission prompt cancelled',
+            cancelled: true,
           })
+          return
         }
         respond({ requestId: request.requestId, result: true })
         break
@@ -58,16 +63,24 @@ async function handlePrompt(
       }
     }
   } catch (error) {
-    // An AppError is a plain object, so `String(error)` here was the
-    // "[object Object]" a declined in-channel download used to surface as.
     respond({
       requestId: request.requestId,
       error: extractMessage(error),
-      cancelled: isCancellation(error),
+      cancelled: prompt.controller.signal.aborted || isCancellation(error),
     })
   } finally {
     clearInterval(pings)
+    if (activePrompts.get(request.requestId) === prompt) activePrompts.delete(request.requestId)
   }
+}
+
+function handleCancel(
+  request: import('@/types/permissionsIpc').PermissionsPromptCancelPayload,
+): void {
+  const prompt = activePrompts.get(request.requestId)
+  if (!prompt) return
+  prompt.controller.abort()
+  prompt.cancel?.()
 }
 
 let started = false
@@ -78,8 +91,11 @@ export function startPermissionsAdapter(): void {
   window.electronAPI.permissions.onPrompt((payload) => {
     void handlePrompt(payload)
   })
+  window.electronAPI.permissions.onCancel(handleCancel)
 }
 
 export function resetPermissionsAdapterForTest(): void {
   started = false
+  for (const prompt of activePrompts.values()) prompt.controller.abort()
+  activePrompts.clear()
 }

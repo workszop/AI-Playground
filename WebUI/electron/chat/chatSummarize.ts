@@ -11,13 +11,13 @@ import { finishTextRequest, submitTextRequest } from '../kernel/orchestrator'
 // factory before the move; the model call now has to come from main, so the
 // store ships the same prompt plus a ChatModelConfig over `chat:summarize`.
 // Step 15: admit as a short `text` occupancy and load here (remember: false
-// so a Home Agent `/load` cannot overwrite the GPU swap-back snapshot).
+// so a transient summary cannot overwrite the GPU swap-back snapshot).
 
 const SUMMARY_PROMPT_PREFIX =
   'Summarize this conversation in 5 words or less. ' +
   'Output only the summary, no quotes, no punctuation.\n\n'
 
-const SUMMARIZE_CONVERSATION_KEY = 'home-agent-summarize'
+const SUMMARIZE_CONVERSATION_KEY = 'chat-summarize'
 
 export async function summarizeConversationText(request: unknown): Promise<string> {
   const req = ChatSummarizeRequestSchema.parse(request) as ChatSummarizeRequest

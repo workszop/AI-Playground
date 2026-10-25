@@ -8,7 +8,6 @@ import { killStaleProcesses } from '../install/processLifecycle.ts'
 import getPort, { portNumbers } from 'get-port'
 import { LlamaCppBackendService } from './llamaCppBackendService.ts'
 import { OpenVINOBackendService } from './openVINOBackendService.ts'
-import { HomeAgentBackendService } from './homeAgentBackendService.ts'
 import { Qwen3TtsBackendService } from './qwen3TtsBackendService.ts'
 import { WhisperBackendService } from './whisperBackendService.ts'
 import type { LocalSettings } from '../../kernel/localSettings.ts'
@@ -19,7 +18,6 @@ export type backend =
   | 'openvino-backend'
   | 'comfyui-backend'
   | 'llamacpp-backend'
-  | 'home-agent-backend'
   | 'qwen3-tts-backend'
   | 'whisper-backend'
 
@@ -268,14 +266,6 @@ export async function aiplaygroundApiServiceRegistry(
       new AiBackendService(
         'ai-backend',
         await getPort({ port: portNumbers(59000, 59999) }),
-        win,
-        settings,
-      ),
-    )
-    instance.register(
-      new HomeAgentBackendService(
-        'home-agent-backend',
-        await getPort({ port: portNumbers(58000, 58999) }),
         win,
         settings,
       ),

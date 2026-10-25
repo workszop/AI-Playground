@@ -16,8 +16,8 @@ import { ignoresSavedInput } from '@/lib/presetSchemas'
 
 /**
  * Renderer-side Artifact capability: one fully-resolved request in, one settled
- * result out. Callers (the Image Gen UI, the chat media tools, Home Agent
- * channels) never touch selection state to make a run happen — no preset
+ * result out. Callers (the Image Gen UI and chat media tools) never touch
+ * selection state to make a run happen: no preset
  * switch, no variant activation, no prompt-field mutation. Everything that
  * decides the output travels on the request; everything the run produces is
  * carried by the tracked MediaItems it registers.
@@ -274,8 +274,7 @@ export async function runArtifact(
   // Cancelled before anything was queued — don't pull in models nobody waits for.
   if (ctx.abortSignal?.aborted) return { state: 'cancelled', items: [] }
 
-  // 3. Required models. Download approval routes through the dialog (or the
-  // remote channel on Home Agent turns) exactly as the UI path always did.
+  // Required models always go through desktop download approval.
   try {
     await imageGen.ensureModelsAreAvailableFor(preset)
   } catch (error) {

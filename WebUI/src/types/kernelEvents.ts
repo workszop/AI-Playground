@@ -77,7 +77,7 @@ export type ArtifactPhase =
 
 /**
  * Who a run's progress belongs to. `panel` is the Image Gen / Edit / Video
- * panel (and Home Agent `/imgGen`); `tool` is the tool call that submitted it,
+ * panel; `tool` is the tool call that submitted it,
  * with `parentToolCallId` naming the delegating `media` call for specialist runs.
  */
 export type ArtifactRunOwner =

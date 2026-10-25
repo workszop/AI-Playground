@@ -8,8 +8,16 @@ vi.mock('../../observability/logger.ts', () => ({
 }))
 
 // Kids-safe guard: stubbed to "safe" so these tests keep covering their own behavior.
+const guardUiMessageStreamMock = vi.hoisted(() => vi.fn())
 vi.mock('../../safety/kidsGuard', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../safety/kidsGuard')>()),
+  ...(await (async () => {
+    const actual = await importOriginal<typeof import('../../safety/kidsGuard')>()
+    guardUiMessageStreamMock.mockImplementation(actual.guardUiMessageStream)
+    return actual
+  })()),
+  guardUiMessageStream: (
+    ...args: Parameters<(typeof import('../../safety/kidsGuard'))['guardUiMessageStream']>
+  ) => guardUiMessageStreamMock(...args),
   checkKidsPrompt: vi.fn(async () => ({ level: 'safe' })),
   checkKidsResponse: vi.fn(async () => ({ level: 'safe' })),
   KIDS_SAFE_AGENT_MODE_DISABLED: false,
@@ -98,7 +106,7 @@ const {
 } = await import('../../chat/chatReadiness')
 const { setKernelEventWindow, resetKernelBusForTest, onKernelEvent } =
   await import('../../kernel/kernelBus')
-const { handleChatAnswer, resetChatAskForTest } = await import('../../chat/chatAsk')
+const { resetChatAskForTest } = await import('../../chat/chatAsk')
 const { listMcpServers, getMcpServerStatus, invokeMcpServerTool } =
   await import('../../adapters/mcp/mcpManager')
 const { resetOrchestratorForTest } = await import('../../kernel/orchestrator')
@@ -247,33 +255,6 @@ function turnRequest(overrides: Record<string, unknown> = {}) {
   }
 }
 
-/** The Home Agent inference picture a turn ships when that preset is active. */
-function homeAgentSnapshot() {
-  return {
-    backend: 'llamaCPP' as const,
-    current: {
-      model: 'qwen-9b',
-      embeddingModel: 'bge-small',
-      deviceId: 'GPU.0',
-      temperature: 0.7,
-      maxTokens: 1024,
-      contextSize: 8192,
-      systemPrompt: 'You are helpful.',
-      aipgToolsEnabled: true,
-      mcpToolsEnabled: false,
-      metricsEnabled: false,
-      ragDocumentCount: 0,
-    },
-    llmModels: {
-      llamaCPP: [{ name: 'qwen-9b', downloaded: true, maxContextSize: 32768 }],
-      openVINO: [],
-      cloud: [],
-    },
-    embeddingModels: [{ name: 'bge-small', downloaded: true }],
-    devices: { llamaCPP: [{ id: 'GPU.0', name: 'Intel Arc' }], openVINO: [] },
-  }
-}
-
 // ── Harness ────────────────────────────────────────────────────────────────────
 
 let events: KernelEvent[]
@@ -288,6 +269,7 @@ beforeEach(() => {
   resetChatEngineDepsForTest()
   resetChatReadinessForTest()
   resetOrchestratorForTest()
+  guardUiMessageStreamMock.mockClear()
   saveChatTurnConversation.mockClear()
   events = []
   detachTap = onKernelEvent((event) => void events.push(event))
@@ -299,7 +281,6 @@ beforeEach(() => {
   setChatModelDeps({
     llmApiBase: () => 'http://127.0.0.1:39101',
     ensureBackendReadiness: vi.fn(),
-    homeAgentAuthToken: () => 'token',
     readCloudProviderKey: () => null,
   })
   vi.mocked(listMcpServers).mockReturnValue([])
@@ -386,7 +367,6 @@ describe('turn engine', () => {
       getService: () => ({ ensureBackendReadiness, baseUrl: 'http://127.0.0.1:39101' }),
       awaitChatWindow,
       stopOvmsImageServer,
-      notifyHomeAgentUpstreamReady: vi.fn(),
     })
     queueFetchMock(sse(textChunks('ok')))
     const base = turnRequest()
@@ -419,7 +399,6 @@ describe('turn engine', () => {
       getService: () => ({ ensureBackendReadiness, baseUrl: 'http://127.0.0.1:39101' }),
       awaitChatWindow: vi.fn(async () => {}),
       stopOvmsImageServer: vi.fn(async () => {}),
-      notifyHomeAgentUpstreamReady: vi.fn(),
     })
     await ensureChatBackendReady({
       serviceName: 'llamacpp-backend',
@@ -480,127 +459,26 @@ describe('turn engine', () => {
     expect(chatTurnActive('conv-2')).toBe(false)
   })
 
-  it('answers a Home Agent read tool from the snapshot the turn shipped', async () => {
-    queueFetchMock(sse(toolCallChunks('getHomeAgentSettings', '{}')), sse(textChunks('read it')))
-    submitChatTurn(
-      turnRequest({
-        tools: [
-          { name: 'getHomeAgentSettings', description: 'Read', inputSchema: { type: 'object' } },
-        ],
-        homeAgentInference: homeAgentSnapshot(),
-      }),
-    )
-    await vi.waitFor(() => {
-      expect(doneTurnIds().length).toBeGreaterThan(0)
-    })
+  it.each(['getHomeAgentSettings', 'configureHomeAgent'])(
+    'rejects removed Home Agent tool %s without a renderer question',
+    async (toolName) => {
+      queueFetchMock(sse(toolCallChunks(toolName, '{}')), sse(textChunks('not available')))
+      submitChatTurn(
+        turnRequest({
+          tools: [{ name: toolName, description: 'Removed', inputSchema: { type: 'object' } }],
+        }),
+      )
+      await vi.waitFor(() => {
+        expect(doneTurnIds().length).toBeGreaterThan(0)
+      })
 
-    expect(sent.some((p) => p.channel === 'chat:ask')).toBe(false)
-    const toolMessage = (
-      requests[1].body.messages as Array<{ role: string; content: unknown }>
-    ).find((m) => m.role === 'tool')
-    expect(JSON.stringify(toolMessage!.content)).toContain('qwen-9b')
-    expect(chatChunks().some((c) => c.type === 'tool-input-available')).toBe(true)
-    expect(chatChunks().some((c) => c.type === 'finish')).toBe(true)
-    const outputChunk = chatChunks().find((c) => c.type === 'tool-output-available')
-    expect(outputChunk).not.toHaveProperty('dynamic', true)
-  })
-
-  it('refuses a Home Agent settings change when the turn carries no snapshot', async () => {
-    queueFetchMock(
-      sse(toolCallChunks('configureHomeAgent', '{"temperature":0.9}')),
-      sse(textChunks('cannot')),
-    )
-    submitChatTurn(
-      turnRequest({
-        tools: [
-          { name: 'configureHomeAgent', description: 'Configure', inputSchema: { type: 'object' } },
-        ],
-      }),
-    )
-    await vi.waitFor(() => {
-      expect(doneTurnIds().length).toBeGreaterThan(0)
-    })
-
-    expect(sent.some((p) => p.channel === 'chat:ask')).toBe(false)
-    const toolMessage = (
-      requests[1].body.messages as Array<{ role: string; content: unknown }>
-    ).find((m) => m.role === 'tool')
-    expect(JSON.stringify(toolMessage!.content)).toMatch(
-      /Home Agent preset is not active|only be changed/,
-    )
-  })
-
-  it('diffs a settings change in main and applies it after the card is confirmed', async () => {
-    queueFetchMock(
-      sse(toolCallChunks('configureHomeAgent', '{"temperature":0.9}')),
-      sse(textChunks('done')),
-    )
-    submitChatTurn(
-      turnRequest({
-        tools: [
-          { name: 'configureHomeAgent', description: 'Configure', inputSchema: { type: 'object' } },
-        ],
-        homeAgentInference: homeAgentSnapshot(),
-      }),
-    )
-
-    const confirm = await vi.waitFor(() => {
-      const found = sent.find((p) => p.channel === 'chat:ask' && p.kind === 'home-agent-confirm')
-      expect(found).toBeDefined()
-      return found as { requestId: string; summaryMarkdown: string }
-    })
-    // The diff is main's: the card is handed a rendered summary, not the request.
-    expect(confirm.summaryMarkdown).toContain('Temperature')
-    expect(confirm.summaryMarkdown).toContain('0.9')
-    handleChatAnswer({ requestId: confirm.requestId, result: true })
-
-    const apply = await vi.waitFor(() => {
-      const found = sent.find((p) => p.channel === 'chat:ask' && p.kind === 'home-agent-apply')
-      expect(found).toBeDefined()
-      return found as { requestId: string; changes: Array<{ field: string; value: unknown }> }
-    })
-    expect(apply.changes).toEqual([expect.objectContaining({ field: 'temperature', value: 0.9 })])
-    handleChatAnswer({ requestId: apply.requestId, result: { backendChanged: false } })
-
-    await vi.waitFor(() => {
-      expect(doneTurnIds().length).toBeGreaterThan(0)
-    })
-    const toolMessage = (
-      requests[1].body.messages as Array<{ role: string; content: unknown }>
-    ).find((m) => m.role === 'tool')
-    expect(JSON.stringify(toolMessage!.content)).toContain('applied')
-  })
-
-  it('leaves the configuration alone when the card is declined', async () => {
-    queueFetchMock(
-      sse(toolCallChunks('configureHomeAgent', '{"temperature":0.9}')),
-      sse(textChunks('ok then')),
-    )
-    submitChatTurn(
-      turnRequest({
-        tools: [
-          { name: 'configureHomeAgent', description: 'Configure', inputSchema: { type: 'object' } },
-        ],
-        homeAgentInference: homeAgentSnapshot(),
-      }),
-    )
-
-    const confirm = await vi.waitFor(() => {
-      const found = sent.find((p) => p.channel === 'chat:ask' && p.kind === 'home-agent-confirm')
-      expect(found).toBeDefined()
-      return found as { requestId: string }
-    })
-    handleChatAnswer({ requestId: confirm.requestId, result: false })
-
-    await vi.waitFor(() => {
-      expect(doneTurnIds().length).toBeGreaterThan(0)
-    })
-    expect(sent.some((p) => p.channel === 'chat:ask' && p.kind === 'home-agent-apply')).toBe(false)
-    const toolMessage = (
-      requests[1].body.messages as Array<{ role: string; content: unknown }>
-    ).find((m) => m.role === 'tool')
-    expect(JSON.stringify(toolMessage!.content)).toContain('declined')
-  })
+      expect(sent.some((p) => p.channel === 'chat:ask')).toBe(false)
+      const toolMessage = (
+        requests[1].body.messages as Array<{ role: string; content: unknown }>
+      ).find((m) => m.role === 'tool')
+      expect(JSON.stringify(toolMessage!.content)).toMatch(/cannot round-trip to the renderer/)
+    },
+  )
 
   it('registers built-in tools as static and MCP tools as dynamic', () => {
     const tools = buildToolSet(
@@ -1305,6 +1183,29 @@ describe('turn engine', () => {
     expect(chatTurnActive('conv-1')).toBe(false)
   })
 
+  it('does not expose raw details when the guarded stream itself fails', async () => {
+    const rawDetails = 'unsafe tool payload from a failed stream'
+    guardUiMessageStreamMock.mockImplementationOnce(
+      () =>
+        new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            controller.error(new Error(rawDetails))
+          },
+        }),
+    )
+    queueFetchMock(sse(textChunks('never shown')))
+    const { turnId } = submitChatTurn(turnRequest())
+    await waitForTurnDone(turnId)
+
+    const error = chatChunks().find((c) => c.type === 'error')
+    expect(error).toEqual({
+      type: 'error',
+      errorText: 'The request could not be completed. Please try again.',
+    })
+    expect(JSON.stringify(events)).not.toContain(rawDetails)
+    expect(chatTurnActive('conv-1')).toBe(false)
+  })
+
   it('cancels a turn without surfacing an error chunk', async () => {
     queueFetchMock(pending())
     const { turnId } = submitChatTurn(turnRequest())
@@ -1342,7 +1243,6 @@ describe('turn engine', () => {
       getService: () => ({ ensureBackendReadiness, baseUrl: 'http://127.0.0.1:39101' }),
       awaitChatWindow,
       stopOvmsImageServer: vi.fn(async () => {}),
-      notifyHomeAgentUpstreamReady: vi.fn(),
     })
     const prepareRag = vi.fn(async (_rag, base: string) => ({
       systemPrompt: `${base}\n\nUse the following context from your knowledge base to answer the question:\n\nchunk`,
@@ -1539,7 +1439,6 @@ describe('turn engine', () => {
       getService: () => ({ ensureBackendReadiness, baseUrl: 'http://127.0.0.1:39101' }),
       awaitChatWindow: vi.fn(async () => {}),
       stopOvmsImageServer: vi.fn(async () => {}),
-      notifyHomeAgentUpstreamReady: vi.fn(),
     })
     vi.mocked(guard.checkKidsPrompt).mockImplementationOnce(async () => {
       order.push(textQueueEvents().some((e) => e.action === 'started') ? 'check' : 'early-check')

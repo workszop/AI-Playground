@@ -1,5 +1,4 @@
 import {
-  REMOTE_DOWNLOAD_GRANT,
   vramWarningGrantKey,
   type PermissionGrant,
   type PermissionGrantOrigin,
@@ -13,30 +12,18 @@ import {
 } from '../persist/grantsStore'
 import { requestPermissionsPrompt } from './promptAdapter'
 
-/**
- * Permissions policy in main (architecture-target §4.7, step 13). Named verbs
- * stay. The renderer is the dialog / channel adapter — this module decides
- * whether a grant already answers, then asks the adapter to prompt (and, for
- * downloads, to run the download). No silent auto-allow: a skip of the
- * in-channel question exists only because the user pre-granted
- * `download:remote-turns`. A hidden window still has Chromium; without a
- * window a download cannot run even with a pre-grant (weights still go through
- * the shared download path).
- */
-
 export type RequestDownloadOptions = {
   onProgress?: () => void
+  signal?: AbortSignal
 }
 
 export async function requestDownloadConsent(
   models: unknown[],
   options: RequestDownloadOptions = {},
 ): Promise<void> {
-  const remote = await isRemoteTurnActive()
-  const skipConfirmation = remote && (await hasPermissionGrant(REMOTE_DOWNLOAD_GRANT))
   await requestPermissionsPrompt<void>(
-    { kind: 'download', models, skipConfirmation },
-    { onProgress: options.onProgress },
+    { kind: 'download', models },
+    { onProgress: options.onProgress, signal: options.signal },
   )
 }
 
@@ -55,14 +42,6 @@ export async function requestVramWarningConsent(req: {
     await grantPermission(key, 'remember')
   }
   return answer.confirmed === true
-}
-
-async function isRemoteTurnActive(): Promise<boolean> {
-  try {
-    return (await requestPermissionsPrompt<boolean>({ kind: 'is-remote' })) === true
-  } catch {
-    return false
-  }
 }
 
 export async function listGrants(): Promise<PermissionGrant[]> {

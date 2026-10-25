@@ -29,8 +29,8 @@ import {
 /**
  * The kernel's one-writer conversation store (architecture-target §6.1,
  * step 8). Threads live as user-data files — `AI-Playground/conversations/`
- * (`<id>.json` plus `index.json`) — and everything else (renderer, Home Agent
- * surfaces) sends mutations here instead of touching the files.
+ * (`<id>.json` plus `index.json`) — and renderer surfaces send mutations here
+ * instead of touching the files.
  *
  * Correctness notes from §6.1, all implemented here: writes are atomic
  * (tmp + rename) so a crash cannot tear a thread; each thread carries
@@ -62,6 +62,16 @@ function conversationsDir(): string {
 
 const INDEX_CHAIN = 'index'
 const INDEX_FILE = 'index.json'
+const LEGACY_HOME_AGENT_PRESET_NAME = 'Home Agent'
+
+function normalizeThreadMeta(meta: ConversationThreadMeta | null): ConversationThreadMeta | null {
+  if (!meta) return null
+  return {
+    ...meta,
+    presetName: meta.presetName === LEGACY_HOME_AGENT_PRESET_NAME ? '' : meta.presetName,
+    kind: 'main',
+  }
+}
 
 function threadFile(id: string): string {
   assertSafeFileId(id, 'conversation')
@@ -79,7 +89,7 @@ function threadDocFromRead(read: JsonRead): ConversationThreadFile | null {
 
 function parseThreadDoc(raw: unknown): ConversationThreadFile | null {
   const parsed = ConversationThreadFileSchema.safeParse(raw)
-  if (parsed.success) return parsed.data
+  if (parsed.success) return { ...parsed.data, meta: normalizeThreadMeta(parsed.data.meta) }
   appLogger.warn('conversation thread failed schema; treated as missing', 'conversations')
   return null
 }
@@ -235,7 +245,7 @@ export async function migrateLegacyConversations(
       }
       if (known.has(id)) continue
       const messages = sanitizeMessages(legacy.conversationList[id])
-      const meta = legacy.conversationThreadMeta[id] ?? null
+      const meta = normalizeThreadMeta(legacy.conversationThreadMeta[id] ?? null)
       const doc: ConversationThreadFile = {
         schemaVersion: 1,
         meta,
@@ -268,7 +278,7 @@ async function writeThread(request: ConversationSaveRequest): Promise<void> {
   const now = Date.now()
   const doc: ConversationThreadFile = {
     schemaVersion: 1,
-    meta: request.meta,
+    meta: normalizeThreadMeta(request.meta),
     ragHashes: request.ragHashes,
     messages: sanitizeMessages(request.messages),
     updatedAt: now,

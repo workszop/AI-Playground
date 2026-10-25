@@ -2,7 +2,7 @@
 //
 // Main — never the renderer — decides whether closing the application window
 // ends the app or merely hides it. Hiding keeps the renderer (and everything it
-// drives today: chat turns, ComfyUI websocket runs, Home Agent setup) alive
+// drives today: chat turns, ComfyUI websocket runs) alive
 // while the user is not looking; an explicit quit still tears everything down
 // through the existing `before-quit` shutdown.
 //
@@ -13,8 +13,6 @@
 export type CloseDecision = 'hide' | 'close'
 
 export type ClosePolicyInputs = {
-  /** The Home Agent backend is installed and its channel server is running. */
-  homeAgentRunning: boolean
   /** The renderer reported tracked work (an activity is in flight). */
   rendererBusy: boolean
   /** Main itself is running an agent turn (Pi session). */
@@ -27,14 +25,13 @@ export type ClosePolicyInputs = {
 
 /**
  * Closing the app window hides it while headless work would be orphaned by a
- * quit — a Home Agent serving channels, an in-flight agent/chat/artifact run,
- * or anything the renderer reported busy. Otherwise the normal close/quit
- * policy applies. Chat and artifact occupancy are main-owned: they must not
+ * quit — an in-flight agent/chat/artifact run, or anything the renderer
+ * reported busy. Otherwise the normal close/quit policy applies. Chat and
+ * artifact occupancy are main-owned: they must not
  * round-trip through `lifecycle:busy` (that flag clears when the renderer dies).
  */
 export function resolveClosePolicy(inputs: ClosePolicyInputs): CloseDecision {
   const headlessWork =
-    inputs.homeAgentRunning ||
     inputs.rendererBusy ||
     inputs.agentTurnActive ||
     inputs.chatTurnActive ||

@@ -10,7 +10,7 @@
  * streaming phase/item events on the kernel bus so the renderer's stores are
  * pure projections of this module. One run is active at a time; later
  * submissions either fail fast ("Another generation is already in progress",
- * the panel and Home Agent behavior) or queue behind it (the chat tools'
+ * the panel behavior) or queue behind it (the chat tools'
  * lane, and in-process agent direct tools waiting for the GPU — all of which
  * is the orchestrator's queue now).
  *
@@ -61,6 +61,7 @@ import {
   submitPrompt,
   uploadInputFile,
   type ComfyClientDeps,
+  type ComfySocketHandle,
 } from './comfyClient'
 import { buildDummyGlb, DUMMY_3D_PRESET_NAME, VIEW_FIXTURE } from '@/lib/devPresetWorkflows'
 import { saveMediaItems } from '../persist/mediaItemFiles'
@@ -156,12 +157,16 @@ export type ArtifactRunnerDeps = {
   /** Which of the preset's required models are missing on disk (ai-backend check). */
   modelsMissing(preset: ComfyUiPreset): Promise<ArtifactMissingModel[]>
   /**
-   * Ask the user for download consent through the renderer's permissions layer
-   * (dialog / Home Agent in-channel / pre-grants). `true` implies the download
+   * Ask the user for download consent through the renderer's permissions layer.
+   * `true` implies the download
    * completed; `false` means declined or cancelled. `onProgress` fires while
    * the download runs, re-arming the idle watchdog.
    */
-  requestModelConsent(models: ArtifactMissingModel[], onProgress?: () => void): Promise<boolean>
+  requestModelConsent(
+    models: ArtifactMissingModel[],
+    onProgress?: () => void,
+    signal?: AbortSignal,
+  ): Promise<boolean>
   ensureOvmsImageReady(
     modelId: string,
     keepModelsLoaded: boolean,
@@ -196,6 +201,12 @@ type ActiveRun = {
   comfyBaseUrl: string | null
   /** Output nodes whose still images passed the kids-safe image filter. */
   checkedOutputs: Set<string>
+  cancelRequested: boolean
+  abortController: AbortController
+  driveDone: Promise<void>
+  resolveDriveDone: () => void
+  cancelCleanup: Promise<void> | null
+  promptSubmitted: boolean
 }
 
 let activeRun: ActiveRun | null = null
@@ -271,12 +282,20 @@ function emitItem(run: ActiveRun, item: MediaItem): void {
   emitArtifactItem(artifactRunTag(run.payload), item)
 }
 
+function runCancellationRequested(run: ActiveRun): boolean {
+  return run.cancelRequested || run.abortController.signal.aborted
+}
+
+function runShouldStop(run: ActiveRun): boolean {
+  return run.settled || runCancellationRequested(run)
+}
+
 function setPhase(
   run: ActiveRun,
   phase: ArtifactPhase,
   progress?: { current: number; max: number },
 ): void {
-  if (run.settled) return
+  if (run.settled || run.cancelRequested) return
   run.phase = phase
   emitArtifactPhase(artifactRunTag(run.payload), phase, progress)
   if (phase === 'running') {
@@ -328,6 +347,10 @@ function persistRendererGallery(run: ActiveRun): void {
 
 function finish(run: ActiveRun, result: ArtifactRunResult): void {
   if (run.settled) return
+  if (run.cancelRequested && result.state !== 'cancelled') {
+    void settleCancelledAfterCleanup(run)
+    return
+  }
   run.settled = true
   runnerDeps?.forgetPromptCheck(run.payload.runId)
   if (run.idleTimer) {
@@ -360,6 +383,10 @@ function finish(run: ActiveRun, result: ArtifactRunResult): void {
 
 function failRun(run: ActiveRun, message: string, interrupt: boolean): void {
   if (run.settled) return
+  if (run.cancelRequested) {
+    void settleCancelledAfterCleanup(run)
+    return
+  }
   emitFailure({
     category: 'generation',
     code: 'generation/failed',
@@ -377,18 +404,31 @@ function failRun(run: ActiveRun, message: string, interrupt: boolean): void {
 }
 
 function cancelRun(run: ActiveRun): void {
+  if (run.settled || run.cancelRequested) return
+  run.cancelRequested = true
+  run.abortController.abort()
+  run.cancelCleanup = run.driveDone.then(() => cancelComfyExecution(run))
+  void settleCancelledAfterCleanup(run)
+}
+
+function cancelComfyExecution(run: ActiveRun): Promise<void> {
+  if (!run.promptSubmitted || !run.comfyBaseUrl) return Promise.resolve()
+  return Promise.allSettled([
+    interruptExecution(run.comfyBaseUrl, clientDeps()),
+    clearQueue(run.comfyBaseUrl, clientDeps()),
+  ]).then(() => undefined)
+}
+
+async function settleCancelledAfterCleanup(run: ActiveRun): Promise<void> {
+  await run.driveDone
+  await run.cancelCleanup
   if (run.settled) return
-  const baseUrl = clientDeps().getServiceBaseUrl()
-  if (baseUrl) {
-    void interruptExecution(baseUrl, clientDeps()).catch(() => {})
-    void clearQueue(baseUrl, clientDeps()).catch(() => {})
-  }
   settleItems(run, 'stopped')
   finish(run, { state: 'cancelled', items: doneItems(run), error: 'Generation cancelled.' })
 }
 
 function checkCompletion(run: ActiveRun): void {
-  if (run.settled) return
+  if (run.settled || run.cancelRequested) return
   if (run.items.some((item) => item.state === 'failed')) {
     finish(run, { state: 'failed', items: doneItems(run), error: 'Generation failed' })
     return
@@ -440,6 +480,10 @@ function startRun(payload: ArtifactRunPayload): Promise<ArtifactRunResult> {
   }
   const deps = runnerDeps
   const items = payload.items ?? buildItems(payload)
+  let resolveDriveDone: () => void = () => {}
+  const driveDone = new Promise<void>((resolve) => {
+    resolveDriveDone = resolve
+  })
   const run: ActiveRun = {
     payload,
     items: [...items],
@@ -454,6 +498,12 @@ function startRun(payload: ArtifactRunPayload): Promise<ArtifactRunResult> {
     clientId: `aipg-artifact-${payload.runId}`,
     comfyBaseUrl: null,
     checkedOutputs: new Set(),
+    cancelRequested: false,
+    abortController: new AbortController(),
+    driveDone,
+    resolveDriveDone,
+    cancelCleanup: null,
+    promptSubmitted: false,
   }
   activeRun = run
 
@@ -474,9 +524,9 @@ function startRun(payload: ArtifactRunPayload): Promise<ArtifactRunResult> {
   for (const item of items) emitItem(run, item)
   emitArtifactPhase(artifactRunTag(payload), 'queued')
 
-  driveRun(run, deps).then(
-    () => {},
-    (error: unknown) => {
+  void driveRun(run, deps)
+    .catch((error: unknown) => {
+      if (runCancellationRequested(run)) return
       failRun(
         run,
         error instanceof Error
@@ -484,8 +534,11 @@ function startRun(payload: ArtifactRunPayload): Promise<ArtifactRunResult> {
           : 'The ComfyUI backend could not generate the image.',
         false,
       )
-    },
-  )
+    })
+    .finally(() => {
+      run.resolveDriveDone()
+      if (run.cancelRequested) void settleCancelledAfterCleanup(run)
+    })
   return result
 }
 
@@ -501,20 +554,28 @@ async function installMissingRequirements(
   )
   const missingPythonPackages: string[] = []
   for (const pkg of preset.requiredPythonPackages ?? []) {
+    if (runShouldStop(run)) return
     if (!(await isPackageInstalled(pkg))) missingPythonPackages.push(pkg)
+    if (runShouldStop(run)) return
   }
   if (missingCustomNodes.length === 0 && missingPythonPackages.length === 0) return
 
+  if (runShouldStop(run)) return
   setPhase(run, 'installing-components')
   // The status watch is not armed yet (it goes on after the backend is
   // running), so this intentional stop/start cannot be mistaken for a crash.
   const wasRunning = service.currentStatus === 'running'
-  if (wasRunning) await service.stop()
   try {
+    if (wasRunning) {
+      await service.stop()
+      if (runShouldStop(run)) return
+    }
     for (const pkg of missingPythonPackages) {
+      if (runShouldStop(run)) return
       await installPypiPackage(pkg, service.getTorchBackendEnv())
     }
     for (const node of missingCustomNodes) {
+      if (runShouldStop(run)) return
       const installed = await downloadCustomNode(parseCustomNodeSpec(node), service.serviceDir, {
         extraEnv: service.getTorchBackendEnv(),
         skipExtraWheels: service.comfyUiVariantName !== 'xpu',
@@ -524,7 +585,7 @@ async function installMissingRequirements(
   } finally {
     if (wasRunning) {
       const status = await service.start()
-      if (status !== 'running') {
+      if (status !== 'running' && !runCancellationRequested(run)) {
         throw new Error('Failed to restart comfyUI. Required Nodes are not active.')
       }
     }
@@ -539,6 +600,7 @@ async function ensureDummyFixtures(run: ActiveRun, baseUrl: string): Promise<voi
     blob: buildDummyGlb(),
     subfolder: VIEW_FIXTURE.subfolder,
   })
+  if (runShouldStop(run)) return
   await uploadInputFile(baseUrl, clientDeps(), {
     name: VIEW_FIXTURE.name,
     blob: await solidViewPng(),
@@ -625,7 +687,19 @@ async function startBackendAndWait(run: ActiveRun): Promise<string | null> {
     return service.baseUrl
   }
   // Boot produces no progress signals; the idle watchdog is the only bound.
-  return await running
+  let abortHandler: (() => void) | undefined
+  const cancelled = new Promise<string | null>((resolve) => {
+    abortHandler = () => resolve(null)
+    run.abortController.signal.addEventListener('abort', abortHandler, { once: true })
+    if (run.abortController.signal.aborted) abortHandler()
+  })
+  const result = await Promise.race([running, cancelled])
+  if (abortHandler) run.abortController.signal.removeEventListener('abort', abortHandler)
+  if (runShouldStop(run)) {
+    run.statusWatch?.()
+    run.statusWatch = null
+  }
+  return result
 }
 
 /** Crash detection: the backend leaving 'running' mid-run fails the run. */
@@ -639,7 +713,7 @@ function armCrashWatch(run: ActiveRun): void {
 }
 
 function handleWebsocketMessage(run: ActiveRun, msg: unknown): void {
-  if (run.settled || activeRun !== run) return
+  if (run.settled || run.cancelRequested || activeRun !== run) return
   let parsed: ReturnType<typeof ComfyMessageSchema.parse>
   try {
     parsed = ComfyMessageSchema.parse(msg)
@@ -737,9 +811,31 @@ function handleWebsocketMessage(run: ActiveRun, msg: unknown): void {
   }
 }
 
+function waitForSocketOpen(run: ActiveRun, socket: ComfySocketHandle): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      run.abortController.signal.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    run.abortController.signal.addEventListener('abort', onAbort, { once: true })
+    socket.opened.then(
+      () => {
+        run.abortController.signal.removeEventListener('abort', onAbort)
+        resolve()
+      },
+      (error: unknown) => {
+        run.abortController.signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
 async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void> {
   armIdleTimeout(run)
   setPhase(run, 'preparing-backend')
+
+  if (runShouldStop(run)) return
 
   // The orchestrator checks the prompt before the GPU window; a run that bypassed it fails closed.
   if (!deps.promptChecked(run.payload.runId)) {
@@ -750,8 +846,14 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
   // In-process tool runs did not go through the renderer's model pre-flight.
   if (run.payload.modelsConsented !== true) {
     const missing = await deps.modelsMissing(run.payload.preset)
+    if (runShouldStop(run)) return
     if (missing.length > 0) {
-      const approved = await deps.requestModelConsent(missing, () => armIdleTimeout(run))
+      const approved = await deps.requestModelConsent(
+        missing,
+        () => armIdleTimeout(run),
+        run.abortController.signal,
+      )
+      if (runShouldStop(run)) return
       if (!approved) {
         cancelRun(run)
         return
@@ -768,24 +870,27 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
   const comfyService = deps.getComfyService()
   if (!comfyService) throw new Error('ComfyUI backend service not found')
   // Launch flags must be in place before the install phase can restart the backend.
+  if (runShouldStop(run)) return
   await comfyService.setPresetParameters(run.payload.preset.requiredComfyUiParameters ?? [])
+  if (runShouldStop(run)) return
   await installMissingRequirements(run, run.payload.preset, comfyService)
-  if (run.settled) return
+  if (runShouldStop(run)) return
   // The node files live in a user-writable folder; ComfyUI must not keep a changed copy loaded.
   if ((await deps.restoreImageFilterNode()) && comfyService.currentStatus === 'running') {
+    if (runShouldStop(run)) return
     appLogger.warn('SafetyChecker node files were changed; restarting ComfyUI', 'kids-guard')
     await comfyService.stop()
   }
-  if (run.settled) return
+  if (runShouldStop(run)) return
 
   const baseUrl = await startBackendAndWait(run)
-  if (run.settled) return
+  if (runShouldStop(run)) return
   if (!baseUrl) throw new Error('ComfyUI backend did not reach running state')
   run.comfyBaseUrl = baseUrl
   armCrashWatch(run)
 
   await ensureDummyFixtures(run, baseUrl)
-  if (run.settled) return
+  if (runShouldStop(run)) return
 
   let ovmsImageUrl: string | null = null
   if (workflowUsesOvmsImage(run.payload.preset.comfyUiApiWorkflow)) {
@@ -805,6 +910,7 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
       run.payload.keepModelsLoaded ?? false,
       `${run.payload.params.width}x${run.payload.params.height}`,
     )
+    if (runShouldStop(run)) return
     if (!result.success) {
       failRun(run, `Failed to start OVMS image server: ${result.error}`, false)
       return
@@ -825,10 +931,17 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
     deps.getPlatform(),
     ovmsImageUrl,
     {
-      readMediaAsDataUri: deps.readMediaAsDataUri,
-      uploadInputFile: (file) => uploadInputFile(baseUrl, clientDeps(), file),
+      readMediaAsDataUri: async (url) => {
+        if (runShouldStop(run)) return null
+        return deps.readMediaAsDataUri(url)
+      },
+      uploadInputFile: async (file) => {
+        if (runShouldStop(run)) return
+        await uploadInputFile(baseUrl, clientDeps(), file)
+      },
     },
   )
+  if (runShouldStop(run)) return
   // Presets live in a user-writable folder, so the filter is checked in what is actually sent.
   const filterProblem = imageFilterProblem(workflow, run.payload.preset.mediaType)
   if (filterProblem) {
@@ -854,19 +967,21 @@ async function driveRun(run: ActiveRun, deps: ArtifactRunnerDeps): Promise<void>
     },
   })
   try {
-    await socket.opened
+    await waitForSocketOpen(run, socket)
   } catch (error) {
     throw new Error(
       `Could not open the ComfyUI progress websocket: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
-  if (run.settled) return
+  if (runShouldStop(run)) return
 
   // One queued prompt per batch entry, seed spliced in per item — the batch
   // shares every other resolved value.
   for (const item of run.items) {
+    if (runShouldStop(run)) return
     const seeded: ComfyUIApiWorkflow = structuredClone(workflow)
     modifySettingInWorkflow(seeded, 'seed', `${(item.settings.seed ?? 0).toFixed(0)}`)
+    run.promptSubmitted = true
     await submitPrompt(baseUrl, clientDeps(), seeded, run.clientId)
   }
   setPhase(run, 'loading-components')

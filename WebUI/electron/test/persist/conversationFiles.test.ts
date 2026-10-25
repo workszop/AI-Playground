@@ -144,7 +144,29 @@ describe('bootstrapConversations', () => {
     expect(byId['100'].messages).toHaveLength(2)
     expect(byId['100'].ragHashes).toEqual(['hash-a'])
     expect(byId['100'].meta).toMatchObject({ presetName: 'Qwen', kind: 'main' })
-    expect(byId['200'].meta).toMatchObject({ kind: 'homeAgent' })
+    expect(byId['200'].meta).toMatchObject({ presetName: '', kind: 'main' })
+  })
+
+  it('normalizes legacy metadata on read without rewriting the saved thread', async () => {
+    await writeThreadFile('legacy', [userMessage('keep me')], {
+      presetName: 'Home Agent',
+      kind: 'homeAgent',
+    })
+    const index = {
+      schemaVersion: 1,
+      lastMainKey: null,
+      threads: [{ id: 'legacy', presetName: 'Home Agent', kind: 'homeAgent', updatedAt: 1 }],
+    }
+    await fs.writeFile(path.join(dirs.real, 'index.json'), `${JSON.stringify(index)}\n`, 'utf8')
+
+    const boot = await bootstrapConversations()
+
+    expect(boot).toMatchObject({ status: 'ok' })
+    if (boot.status !== 'ok') return
+    expect(boot.threads[0].meta).toMatchObject({ presetName: '', kind: 'main' })
+    expect(boot.threads[0].messages).toHaveLength(1)
+    const saved = await readJson(path.join(dirs.real, 'legacy.json'))
+    expect(saved.meta).toMatchObject({ presetName: 'Home Agent', kind: 'homeAgent' })
   })
 
   it('treats a thread whose file is gone as empty, not as a boot failure', async () => {
@@ -430,7 +452,7 @@ describe('migrateLegacyConversations', () => {
     expect(messages[0].parts[0].text).toBe('first')
   })
 
-  it('migrates the Home Agent singleton id', async () => {
+  it('migrates the legacy Home Agent singleton id as an ordinary chat', async () => {
     const boot = await migrateLegacyConversations({
       conversationList: { __aipg_home_agent__: [userMessage('hi')] },
       conversationThreadMeta: {
@@ -443,7 +465,7 @@ describe('migrateLegacyConversations', () => {
     if (boot.status !== 'ok') return
     expect(boot.threads).toHaveLength(1)
     expect(boot.threads[0].id).toBe('__aipg_home_agent__')
-    expect(boot.threads[0].meta).toMatchObject({ kind: 'homeAgent' })
+    expect(boot.threads[0].meta).toMatchObject({ presetName: '', kind: 'main' })
     expect(await listDir(dirs.real)).toEqual(
       expect.arrayContaining(['__aipg_home_agent__.json', 'index.json']),
     )

@@ -5,7 +5,6 @@ import { comfyUiImageEdit } from './comfyUiImageEdit'
 import { media } from './media'
 import { captureScreenshot } from './captureScreenshot'
 import { browseWeb, interactWithWebPage, screenshotWebPage, searchWeb } from './browseWeb'
-import { configureHomeAgent, getHomeAgentSettings, listHomeAgentModels } from './configureHomeAgent'
 import { synthesizeTextToSpeech } from './synthesizeTextToSpeech'
 import { transcribeAudio } from './transcribeAudio'
 
@@ -26,16 +25,3 @@ export const aipgTools = {
 } satisfies ToolSet
 
 export type AipgTools = InferUITools<typeof aipgTools>
-
-/**
- * Tools offered only to the Home Agent preset (gated in `resolveBuiltinTools()`).
- * Kept separate from `aipgTools` on purpose: folding them into the
- * `InferUITools<typeof aipgTools>` inference above tips TypeScript over its
- * recursion limit and collapses the whole message-type graph to `any`. These
- * are merged into the runtime `ToolSet` instead, without widening `AipgTools`.
- */
-export const homeAgentTools = {
-  getHomeAgentSettings,
-  listHomeAgentModels,
-  configureHomeAgent,
-} satisfies ToolSet

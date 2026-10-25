@@ -228,7 +228,6 @@ import * as toast from '@/assets/js/toast'
 import { useModels } from '@/assets/js/store/models'
 import { useDialogStore } from '@/assets/js/store/dialogs.ts'
 import { EtaEstimator } from '@/lib/etaEstimator'
-import { aipgFetch } from '@/lib/loopbackAuth'
 import { fetchModelMeta, runModelDownload } from '@/lib/modelDownloader'
 import { parseHumanSize, sumHumanSizes } from '@/lib/humanSize'
 import { createCancellation } from '@/assets/js/errors/appError'
@@ -253,7 +252,7 @@ const sizeRequesting = ref(false)
 const hashError = ref(false)
 const errorText = ref('')
 const downloadErrorRetryable = ref(false)
-let abortController: AbortController
+let activeDownloadSessionId: number | null = null
 const animate = ref(false)
 const readTerms = ref(false)
 const downloadModelRender = ref<DownloadModelRender[]>([])
@@ -277,21 +276,25 @@ const totalDownloadSize = computed(() => {
 })
 const etaEstimator = new EtaEstimator(100)
 
-watch(downloadDialogVisible, async (isVisible) => {
-  if (isVisible) {
+watch(
+  () => [downloadDialogVisible.value, dialogStore.currentDownloadSession()] as const,
+  async ([isVisible, sessionId]) => {
+    if (!isVisible || sessionId === null) return
     nextTick(() => {
-      animate.value = true
+      if (dialogStore.isDownloadSessionCurrent(sessionId)) animate.value = true
     })
-    await initializeDownloadDialog()
-    animate.value = false
-  }
-})
+    await initializeDownloadDialog(sessionId)
+    if (dialogStore.isDownloadSessionCurrent(sessionId)) animate.value = false
+  },
+)
 
-async function initializeDownloadDialog() {
-  if (downloding) {
+async function initializeDownloadDialog(sessionId: number) {
+  const fail = downloadFailFunction.value
+  const requestedModels = downloadList.value.slice()
+  if (downloding && activeDownloadSessionId === sessionId) {
     toast.error(i18nState.DOWNLOADER_CONFLICT)
-    downloadFailFunction.value?.({ type: 'conflict' })
-    dialogStore.closeDownloadDialog()
+    fail?.({ type: 'conflict' })
+    dialogStore.closeDownloadDialog(sessionId)
     return
   }
 
@@ -302,16 +305,17 @@ async function initializeDownloadDialog() {
   downloadErrorRetryable.value = false
   percent.value = 0
   taskPercent.value = 0
-  downloadModelRender.value = downloadList.value.map((item) => {
+  downloadModelRender.value = requestedModels.map((item) => {
     return { size: '???', ...item }
   })
   readTerms.value = false
 
   try {
-    const meta = await fetchModelMeta(downloadList.value, {
+    const meta = await fetchModelMeta(requestedModels, {
       apiHost: globalSetup.apiHost,
       hfToken: models.hfToken,
     })
+    if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
     const byKey = new Map(meta.map((m) => [`${m.repo_id}_${m.type}`, m]))
     for (const item of downloadModelRender.value) {
       const m = byKey.get(`${item.repo_id}_${item.type}`)
@@ -321,7 +325,8 @@ async function initializeDownloadDialog() {
     }
     sizeRequesting.value = false
   } catch (ex) {
-    downloadFailFunction.value?.({ type: 'error', error: ex })
+    if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
+    fail?.({ type: 'error', error: ex })
     sizeRequesting.value = false
   }
 }
@@ -364,21 +369,29 @@ function getFunctionTip(type: string): string {
   }
 }
 
-function download() {
+async function download() {
+  const sessionId = dialogStore.currentDownloadSession()
+  if (sessionId === null || !dialogStore.isDownloadSessionCurrent(sessionId)) return
+  const success = downloadSuccessFunction.value
+  const fail = downloadFailFunction.value
+  await dialogStore.waitForDownloadCleanup()
+  if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
   downloding = true
+  activeDownloadSessionId = sessionId
   const accessableDownloadList = downloadModelRender.value.filter(
     (item) => item.accessGranted === true,
   )
   allDownloadTip.value = `${i18nState.DOWNLOADER_DONWLOAD_TASK_PROGRESS} 0/${accessableDownloadList.length}`
   percent.value = 0
   taskPercent.value = 0
-  abortController = new AbortController()
+  const abortController = new AbortController()
   curDownloadTip.value = ''
-  runModelDownload(accessableDownloadList, {
+  const activeDownloadPromise = runModelDownload(accessableDownloadList, {
     apiHost: globalSetup.apiHost,
     hfToken: models.hfTokenIsValid ? models.hfToken : undefined,
     signal: abortController.signal,
     onProgress: (p) => {
+      if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
       // Per-file progress events carry a speed; the synthetic 100% event emitted
       // on completion does not — only refresh the ETA line on real progress.
       if (p.speed !== undefined) {
@@ -390,9 +403,11 @@ function download() {
       allDownloadTip.value = `${i18nState.DOWNLOADER_DONWLOAD_TASK_PROGRESS} ${p.completed}/${p.total}`
     },
     onModelCompleted: () => {
+      if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
       models.refreshModels()
     },
     onError: (e) => {
+      if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
       hashError.value = true
       downloding = false
       downloadErrorRetryable.value = e.retryable
@@ -416,26 +431,38 @@ function download() {
           errorText.value = i18nState.ERROR_GENERATE_UNKONW_EXCEPTION
           break
       }
-      downloadFailFunction.value?.({ type: 'error', error: errorText.value })
+      fail?.({ type: 'error', error: errorText.value })
     },
   })
     .then(() => {
+      if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
       downloding = false
-      dialogStore.closeDownloadDialog()
-      downloadSuccessFunction.value?.()
+      activeDownloadSessionId = null
+      dialogStore.finishDownloadSession(sessionId)
+      success?.()
     })
     .catch(() => {
       // onError already surfaced a structured failure; an abort or other
       // rejection just needs to stop the spinner.
+      if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
       downloding = false
+      activeDownloadSessionId = null
+      dialogStore.registerDownloadCancel(sessionId)
     })
+  dialogStore.registerDownloadCancel(sessionId, async () => {
+    abortController.abort()
+    await activeDownloadPromise.catch(() => {})
+  })
 }
 
 function cancelConfirm() {
-  downloadFailFunction.value?.(
-    createCancellation({ technicalMessage: 'Download cancelled by user' }),
-  )
-  dialogStore.closeDownloadDialog()
+  const sessionId = dialogStore.currentDownloadSession()
+  if (sessionId !== null) {
+    void dialogStore.cancelDownloadSession(
+      sessionId,
+      createCancellation({ technicalMessage: 'Download cancelled by user' }),
+    )
+  }
 }
 
 function confirmDownload() {
@@ -454,18 +481,18 @@ function retryDownload() {
 }
 
 function cancelDownload() {
-  abortController?.abort()
-  aipgFetch(`${globalSetup.apiHost}/api/stopDownloadModel`)
-  downloadFailFunction.value?.(
-    createCancellation({ technicalMessage: 'Download cancelled by user' }),
-  )
-  downloding = false
-  dialogStore.closeDownloadDialog()
+  const sessionId = dialogStore.currentDownloadSession()
+  if (sessionId !== null) {
+    void dialogStore.cancelDownloadSession(
+      sessionId,
+      createCancellation({ technicalMessage: 'Download cancelled by user' }),
+    )
+  }
 }
 
 function close() {
-  downloding = false
-  dialogStore.closeDownloadDialog()
+  const sessionId = dialogStore.currentDownloadSession()
+  if (sessionId !== null) dialogStore.closeDownloadDialog(sessionId)
 }
 </script>
 

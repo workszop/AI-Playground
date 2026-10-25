@@ -45,12 +45,8 @@ describe('chatAsk', () => {
 
   it('settles a question when the turn it belongs to is cancelled', async () => {
     const controller = new AbortController()
-    const answer = askRenderer<boolean>(
-      {
-        kind: 'home-agent-confirm',
-        conversationKey: 'conv-1',
-        summaryMarkdown: 'Switch backend',
-      },
+    const answer = askRenderer<{ text: string }>(
+      { kind: 'speech-transcribe', audioBase64: 'QQ==' },
       { abortSignal: controller.signal },
     )
 

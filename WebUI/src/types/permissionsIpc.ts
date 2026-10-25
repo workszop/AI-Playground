@@ -4,7 +4,7 @@ import { z } from 'zod'
  * Shared types for the kernel permissions surface (architecture-target §4.7,
  * step 13). Named verbs stay (`requestDownload` / `requestVramWarning` /
  * `notify`); grant vocabulary is not this row. The renderer is the dialog
- * adapter; main owns grants and the skip-confirmation decision.
+ * adapter; main owns remembered VRAM-warning grants.
  */
 
 export const PermissionGrantOriginSchema = z.enum(['remember', 'pre-grant'])
@@ -24,18 +24,15 @@ export const PermissionGrantsFileSchema = z.object({
 export type PermissionGrantsFile = z.infer<typeof PermissionGrantsFileSchema>
 
 export const VRAM_WARNING_GRANT_PREFIX = 'vram-warning:'
-export const REMOTE_DOWNLOAD_GRANT = 'download:remote-turns'
 
 export function vramWarningGrantKey(presetName: string): string {
   return VRAM_WARNING_GRANT_PREFIX + presetName
 }
 
 export const PermissionsPromptBodySchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('is-remote') }),
   z.object({
     kind: z.literal('download'),
     models: z.array(z.unknown()),
-    skipConfirmation: z.boolean(),
   }),
   z.object({
     kind: z.literal('vram-warning'),
@@ -46,6 +43,8 @@ export const PermissionsPromptBodySchema = z.discriminatedUnion('kind', [
 export type PermissionsPromptBody = z.infer<typeof PermissionsPromptBodySchema>
 
 export type PermissionsPromptPayload = PermissionsPromptBody & { requestId: string }
+
+export type PermissionsPromptCancelPayload = { requestId: string }
 
 export type PermissionsPromptResponse =
   | { requestId: string; progress: true }

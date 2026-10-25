@@ -3,25 +3,22 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { PermissionsPromptPayload } from '@/types/permissionsIpc'
 import { createCancellation } from '@/assets/js/errors/appError'
 
-const isActive = vi.fn(() => false)
-const downloadModels = vi.fn(async () => {})
 const showDownloadDialog = vi.fn()
+const cancelDownloadDialog = vi.fn()
 const showWarningDialog = vi.fn()
 const respondMock = vi.fn(async () => {})
 const onPromptMock = vi.fn<(callback: (payload: PermissionsPromptPayload) => void) => () => void>()
+const onCancelMock = vi.fn<(callback: (payload: { requestId: string }) => void) => () => void>()
 
 vi.mock('@/assets/js/store/dialogs', () => ({
-  useDialogStore: () => ({ showDownloadDialog, showWarningDialog }),
-}))
-
-vi.mock('@/assets/js/permissions/remoteTurnPort', () => ({
-  remoteTurnPort: () => ({ isActive, downloadModels }),
+  useDialogStore: () => ({ showDownloadDialog, cancelDownloadDialog, showWarningDialog }),
 }))
 
 vi.stubGlobal('window', {
   electronAPI: {
     permissions: {
       onPrompt: onPromptMock,
+      onCancel: onCancelMock,
       respond: respondMock,
     },
   },
@@ -36,11 +33,11 @@ beforeEach(() => {
   setActivePinia(createPinia())
   resetPermissionsAdapterForTest()
   vi.clearAllMocks()
-  isActive.mockReturnValue(false)
   onPromptMock.mockImplementation((callback) => {
     handler = callback
     return () => {}
   })
+  onCancelMock.mockImplementation(() => () => {})
   startPermissionsAdapter()
 })
 
@@ -50,38 +47,34 @@ afterEach(() => {
 })
 
 describe('permissions prompt adapter', () => {
-  it('reports whether a remote turn is active', async () => {
-    isActive.mockReturnValue(true)
-    handler?.({ requestId: 'r1', kind: 'is-remote' })
-    await vi.waitFor(() => expect(respondMock).toHaveBeenCalled())
-    expect(respondMock).toHaveBeenCalledWith({ requestId: 'r1', result: true })
-  })
-
-  it('prompts through the desktop download modal when no remote turn is active', async () => {
+  it('prompts through the desktop download modal', async () => {
     const models = [{ repo_id: 'test/model' }] as DownloadModelParam[]
     const pending = new Promise<void>((resolve) => {
       respondMock.mockImplementation(async () => resolve())
     })
-    handler?.({ requestId: 'r2', kind: 'download', models, skipConfirmation: false })
+    handler?.({ requestId: 'r2', kind: 'download', models })
     await vi.waitFor(() => expect(showDownloadDialog).toHaveBeenCalledTimes(1))
     const [list, onSuccess] = showDownloadDialog.mock.calls[0]
     expect(list).toBe(models)
     onSuccess()
     await pending
-    expect(downloadModels).not.toHaveBeenCalled()
     expect(respondMock).toHaveBeenCalledWith({ requestId: 'r2', result: true })
   })
 
-  it('routes a remote turn to the registered port, including skipConfirmation', async () => {
-    isActive.mockReturnValue(true)
-    const models = [{ repo_id: 'test/model' }] as DownloadModelParam[]
-    const pending = new Promise<void>((resolve) => {
-      respondMock.mockImplementation(async () => resolve())
-    })
-    handler?.({ requestId: 'r3', kind: 'download', models, skipConfirmation: true })
-    await pending
-    expect(downloadModels).toHaveBeenCalledWith(models, { skipConfirmation: true })
-    expect(showDownloadDialog).not.toHaveBeenCalled()
+  it('cancels only the owned download and waits for its cleanup acknowledgement', async () => {
+    handler?.({ requestId: 'r3', kind: 'download', models: [] })
+    const onCancel = onCancelMock.mock.calls[0][0]
+    onCancel({ requestId: 'unrelated' })
+    expect(cancelDownloadDialog).not.toHaveBeenCalled()
+    onCancel({ requestId: 'r3' })
+    expect(cancelDownloadDialog).toHaveBeenCalledExactlyOnceWith('r3')
+    expect(respondMock).not.toHaveBeenCalled()
+    showDownloadDialog.mock.calls[0][2](createCancellation())
+    await vi.waitFor(() =>
+      expect(respondMock).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: 'r3', cancelled: true }),
+      ),
+    )
   })
 
   it('forwards a declined download as the request error', async () => {
@@ -90,7 +83,6 @@ describe('permissions prompt adapter', () => {
       requestId: 'r4',
       kind: 'download',
       models: [{ repo_id: 'x' }],
-      skipConfirmation: false,
     })
     await vi.waitFor(() =>
       expect(respondMock).toHaveBeenCalledWith({
@@ -103,18 +95,17 @@ describe('permissions prompt adapter', () => {
 
   it('reports an AppError by message and marks a cancellation as one', async () => {
     showDownloadDialog.mockImplementation((_list, _ok, fail) =>
-      fail(createCancellation({ technicalMessage: 'remote model download declined' })),
+      fail(createCancellation({ technicalMessage: 'model download declined' })),
     )
     handler?.({
       requestId: 'r6',
       kind: 'download',
       models: [{ repo_id: 'x' }],
-      skipConfirmation: false,
     })
     await vi.waitFor(() =>
       expect(respondMock).toHaveBeenCalledWith({
         requestId: 'r6',
-        error: 'remote model download declined',
+        error: 'model download declined',
         cancelled: true,
       }),
     )

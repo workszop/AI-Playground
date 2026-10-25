@@ -1,5 +1,9 @@
 # Target architecture — capabilities, drivers, state ownership
 
+> **Historical snapshot:** Home Agent references in this document describe the design before that
+> feature was removed. They are retained as historical context, not current architecture guidance;
+> the related diagrams remain intentionally unchanged.
+
 **Status: steps 1–15 of the migration order (§8 / §8.3) have landed.** Steps 1–8 were nine
 kernel-owned persist slices (conversations, agent-session files, generated-media records, user
 preferences, per-preset settings knobs, backend launch flags, the RAG document list, the agent

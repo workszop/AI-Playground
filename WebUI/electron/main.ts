@@ -53,7 +53,6 @@ import {
   COMFYUI_DEFAULT_PARAMETERS,
 } from './adapters/backends/comfyUIBackendService'
 import { AiBackendService } from './adapters/backends/aiBackendService'
-import { HomeAgentBackendService } from './adapters/backends/homeAgentBackendService'
 import { setCloudProviderKeyReader } from './adapters/cloudUpstream'
 import { Qwen3TtsBackendService } from './adapters/backends/qwen3TtsBackendService'
 import { WhisperBackendService } from './adapters/backends/whisperBackendService'
@@ -445,11 +444,6 @@ let serviceRegistry: ApiServiceRegistryImpl | null = null
 // sink). Pushed over `lifecycle:busy` whenever it flips.
 let rendererBusy = false
 
-function isHomeAgentRunning(): boolean {
-  const service = serviceRegistry?.getService('home-agent-backend')
-  return service?.get_info().status === 'running'
-}
-
 function cloudProviderKeyPath(providerId: string): string {
   return path.join(app.getPath('userData'), `cloud-provider-${providerId}.json`)
 }
@@ -758,11 +752,10 @@ async function createWindow() {
   win.on('close', (event) => {
     // Main owns the hide/reopen/quit policy (architecture-target §5.1), never
     // the renderer: closing the window only hides it while headless work a
-    // quit would orphan is in flight — Home Agent, in-flight agent/chat/artifact
-    // work in main, or anything the renderer reported busy. A hidden window is
+    // quit would orphan in-flight agent/chat/artifact work in main, or anything
+    // the renderer reported busy. A hidden window is
     // reopened by relaunching (second-instance) or dock activation.
     const decision = resolveClosePolicy({
-      homeAgentRunning: isHomeAgentRunning(),
       rendererBusy,
       agentTurnActive: isAgentTurnActive(),
       chatTurnActive: anyChatTurnActive(),
@@ -793,35 +786,9 @@ async function createWindow() {
     void appShutdown.shutdown(3000)
   })
 
-  // [HA-DIAG] Temporary: surface renderer `[HA-DIAG]` perf logs in the main
-  // terminal stream (renderer console.log normally only reaches DevTools).
-  // Remove together with the renderer-side [HA-DIAG] logging.
-  win.webContents.on('console-message', (event: unknown, ...rest: unknown[]) => {
-    const e = event as { message?: string }
-    // Electron 35+ passes a single event object with `.message`; older builds
-    // pass (event, level, message, line, sourceId).
-    const message =
-      typeof e?.message === 'string' ? e.message : ((rest[1] as string | undefined) ?? '')
-    // Route through appLogger so the line reaches the in-app debug viewer (fed
-    // by the `debugLog` IPC). appLogger also mirrors back to the renderer, which
-    // App.vue re-logs as `[ha-diag] <message>` — that re-enters this handler. The
-    // `[ha-diag]` source prefix (absent from the original renderer line) marks
-    // the echo, so skipping it breaks the otherwise-infinite loop.
-    if (message.includes('[HA-DIAG]') && !message.includes('[ha-diag]')) {
-      appLogger.info(message, 'ha-diag')
-    }
-  })
-
   win.webContents.on('did-finish-load', () => {
     setTimeout(() => {
       appLogger.onWebcontentReady(win!.webContents)
-      // [HA-DIAG] One-shot marker: if you see this line, the rebuilt main process
-      // with the renderer-log forwarder is running. If it's absent, main.ts did
-      // not reload — fully restart Electron (HMR only reloads the renderer).
-      appLogger.info(
-        '[HA-DIAG] forwarder installed — renderer perf logs will appear here',
-        'ha-diag',
-      )
     }, 100)
 
     // Check the kernel-owned preferences file after page loads. `undefined`
@@ -990,11 +957,9 @@ async function createWindow() {
  * Load the app document into an already-created window.
  *
  * Split from createWindow so the renderer only boots once the service registry
- * exists: several stores fire IPC the moment they are created — homeAgent's
- * `channel:loadConfig`, whose handler is registered off the registry's
- * home-agent service, and the setup wizard's `getServices`. A renderer that won
- * that race got "No handler registered for 'channel:loadConfig'" and an empty
- * service list ("ai-backend service not found"), neither of which is retried.
+ * exists: the setup wizard's `getServices` fires as soon as the renderer is
+ * created. A renderer that won that race got an empty service list ("ai-backend
+ * service not found"), neither of which is retried.
  */
 async function loadAppWindow(window: BrowserWindow): Promise<void> {
   if (VITE_DEV_SERVER_URL) {
@@ -1250,10 +1215,6 @@ app.on('second-instance', (_event, _commandLine, _workingDirectory) => {
 
 async function initServiceRegistry(win: BrowserWindow, settings: LocalSettings) {
   serviceRegistry = await aiplaygroundApiServiceRegistry(win, settings)
-  const homeAgent = serviceRegistry.getService('home-agent-backend')
-  if (homeAgent instanceof HomeAgentBackendService) {
-    homeAgent.registerIpcHandlers()
-  }
   wireArtifactRunner(settings)
   wireConversations(settings)
   wireAgentSessions(settings)
@@ -1316,8 +1277,8 @@ function wireAgentWorkspace(settings: LocalSettings): void {
  * Chat turns run in main (architecture-target §8 step 6): the renderer submits
  * a typed request over `chat:submitTurn` and consumes kernel `chat-chunk`
  * events. These deps are the only pieces of that engine that live outside the
- * chat modules — the service registry, last-load memory, the Home Agent
- * loopback token, and on-disk aipg-media bytes.
+ * chat modules — the service registry, last-load memory, and on-disk
+ * aipg-media bytes.
  */
 function wireChatEngine(): void {
   setChatReadinessDeps({
@@ -1327,12 +1288,6 @@ function wireChatEngine(): void {
       const ovms = serviceRegistry?.getService('openvino-backend')
       if (ovms && 'stopImageServer' in ovms && typeof ovms.stopImageServer === 'function') {
         await ovms.stopImageServer()
-      }
-    },
-    notifyHomeAgentUpstreamReady: (baseUrl) => {
-      const homeAgentSvc = serviceRegistry?.getService('home-agent-backend')
-      if (homeAgentSvc instanceof HomeAgentBackendService) {
-        homeAgentSvc.notifyUpstreamReady(baseUrl)
       }
     },
     resetIdleChatBackend: async (serviceName) => {
@@ -1345,12 +1300,6 @@ function wireChatEngine(): void {
   setChatModelDeps({
     llmApiBase: (backend) => llmServerBaseUrl(backend),
     ensureBackendReadiness: (args) => ensureChatBackendReady(args),
-    homeAgentAuthToken: () => {
-      const homeAgentSvc = serviceRegistry?.getService('home-agent-backend')
-      return homeAgentSvc instanceof HomeAgentBackendService
-        ? homeAgentSvc.getLoopbackAuthToken()
-        : ''
-    },
     readCloudProviderKey,
   })
   // Reuses the main-side aipg-media reader the agent attachments already use;
@@ -1472,9 +1421,9 @@ function wireArtifactRunner(settings: LocalSettings): void {
       })
       return reply.models ?? []
     },
-    requestModelConsent: async (models, onProgress) => {
+    requestModelConsent: async (models, onProgress, signal) => {
       try {
-        await requestDownloadConsent(models, { onProgress })
+        await requestDownloadConsent(models, { onProgress, signal })
         return true
       } catch (error) {
         appLogger.warn(`Model consent request failed: ${String(error)}`, 'electron-backend')
@@ -1495,7 +1444,7 @@ function wireArtifactRunner(settings: LocalSettings): void {
   })
 
   // The orchestrator owns GPU policy (step 7): every run — panel, chat tool,
-  // Home Agent or in-process agent tool — is bracketed through these, so the
+  // or in-process agent tool — is bracketed through these, so the
   // renderer's stop/return wraps and the occupancy refcount are gone.
   setOrchestratorDeps({
     stopChatForMedia: stopChatServicesForMedia,
@@ -1733,7 +1682,6 @@ function initEventHandle() {
     LLAMACPP_DEFAULT_PARAMETERS,
     AiBackendService,
     ComfyUiBackendService,
-    HomeAgentBackendService,
     Qwen3TtsBackendService,
     WhisperBackendService,
   }

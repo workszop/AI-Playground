@@ -68,7 +68,13 @@ import {
   setKernelEventWindow,
   getKernelSnapshot,
 } from '../../kernel/kernelBus'
-import { submitPrompt, getComfySocket, interruptExecution } from '../../artifact/comfyClient'
+import {
+  submitPrompt,
+  getComfySocket,
+  interruptExecution,
+  clearQueue,
+} from '../../artifact/comfyClient'
+import { downloadCustomNode, isCustomNodeInstalled } from '../../adapters/backends/comfyuiTools'
 import type {
   ComfyClientDeps,
   ComfySocketHandle,
@@ -259,6 +265,8 @@ describe('artifact runner', () => {
         submittedPrompts.push({ workflow, clientId })
       },
     )
+    vi.mocked(isCustomNodeInstalled).mockReturnValue(true)
+    vi.mocked(downloadCustomNode).mockResolvedValue(true)
   })
 
   afterEach(() => {
@@ -541,6 +549,93 @@ describe('artifact runner', () => {
     expect(submittedPrompts).toHaveLength(0)
   })
 
+  it('holds the queue while a cancelled consent prompt settles and ignores late approval', async () => {
+    missingModels = [
+      { repo_id: 'some/model.gguf', type: 'unet', backend: 'comfyui', model_path: '/models' },
+    ]
+    let resolveConsent!: (approved: boolean) => void
+    const requestModelConsent = vi.fn(
+      async (_models: ArtifactMissingModel[], _onProgress?: () => void, _signal?: AbortSignal) =>
+        new Promise<boolean>((resolve) => {
+          resolveConsent = resolve
+        }),
+    )
+    setArtifactRunnerDeps(deps({ requestModelConsent }))
+    const first = submitArtifactRun(payload({ runId: 'consent-run', modelsConsented: undefined }))
+    await vi.waitFor(() => expect(requestModelConsent).toHaveBeenCalledTimes(1))
+
+    missingModels = []
+    const queued = submitArtifactRun(
+      payload({ runId: 'queued-after-consent', modelsConsented: undefined }),
+      { queue: 'queue' },
+    )
+    cancelArtifactRun('consent-run')
+
+    expect(await Promise.race([first, Promise.resolve('pending')])).toBe('pending')
+    expect(await Promise.race([queued, Promise.resolve('pending')])).toBe('pending')
+    expect(setPresetParameters).not.toHaveBeenCalled()
+
+    resolveConsent(true)
+    expect((await first).state).toBe('cancelled')
+
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(2))
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '4',
+        output: { images: [{ filename: 'queued.png', subfolder: '', type: 'output' }] },
+      },
+    })
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '4',
+        output: { images: [{ filename: 'queued-2.png', subfolder: '', type: 'output' }] },
+      },
+    })
+    expect((await queued).state).toBe('completed')
+  })
+
+  it('keeps the queue occupied through a cancelled non-abortable component install', async () => {
+    vi.mocked(isCustomNodeInstalled).mockReturnValue(false)
+    let resolveInstall!: (installed: boolean) => void
+    vi.mocked(downloadCustomNode).mockImplementationOnce(
+      async () =>
+        new Promise<boolean>((resolve) => {
+          resolveInstall = resolve
+        }),
+    )
+    setArtifactRunnerDeps(deps())
+    const first = submitArtifactRun(payload({ runId: 'install-run' }))
+    await vi.waitFor(() => expect(downloadCustomNode).toHaveBeenCalledTimes(1))
+
+    vi.mocked(isCustomNodeInstalled).mockReturnValue(true)
+    const queued = submitArtifactRun(payload({ runId: 'queued-after-install' }), { queue: 'queue' })
+    cancelArtifactRun('install-run')
+    expect(await Promise.race([first, Promise.resolve('pending')])).toBe('pending')
+    expect(await Promise.race([queued, Promise.resolve('pending')])).toBe('pending')
+
+    resolveInstall(true)
+    expect((await first).state).toBe('cancelled')
+    expect(submittedPrompts).toHaveLength(0)
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(2))
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '4',
+        output: { images: [{ filename: 'queued.png', subfolder: '', type: 'output' }] },
+      },
+    })
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '4',
+        output: { images: [{ filename: 'queued-2.png', subfolder: '', type: 'output' }] },
+      },
+    })
+    expect((await queued).state).toBe('completed')
+  })
+
   it('starts the backend and waits for the running status before submitting', async () => {
     serviceStatus = 'stopped'
     setArtifactRunnerDeps(deps())
@@ -557,6 +652,47 @@ describe('artifact runner', () => {
       },
     })
     expect((await run).state).toBe('completed')
+  })
+
+  it('stops waiting for backend startup when cancellation arrives', async () => {
+    const service = {
+      currentStatus: 'starting',
+      baseUrl: 'http://127.0.0.1:49123',
+      start: vi.fn(async () => 'starting'),
+      stop: vi.fn(async () => 'stopped'),
+      getLoopbackAuthToken: () => 'token',
+      serviceDir: '/comfy',
+      getTorchBackendEnv: () => ({}),
+      comfyUiVariantName: 'cpu',
+      setPresetParameters,
+    } as unknown as RunnerComfyService
+    setArtifactRunnerDeps(deps({ getComfyService: () => service }))
+    const firstRequest = payload({
+      runId: 'starting-cancel-run',
+      params: { ...payload().params, batchSize: 1 },
+    })
+    const first = submitArtifactRun({ ...firstRequest, items: itemsFor(firstRequest) })
+    await vi.waitFor(() => expect(setPresetParameters).toHaveBeenCalled())
+
+    const queued = submitArtifactRun(
+      payload({ runId: 'starting-cancel-queued', params: { ...payload().params, batchSize: 1 } }),
+      { queue: 'queue' },
+    )
+    cancelArtifactRun('starting-cancel-run')
+    expect((await first).state).toBe('cancelled')
+    expect(await Promise.race([queued, Promise.resolve('pending')])).toBe('pending')
+
+    service.currentStatus = 'running'
+    for (const listener of statusListeners) listener('running')
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(1))
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '4',
+        output: { images: [{ filename: 'queued.png', subfolder: '', type: 'output' }] },
+      },
+    })
+    expect((await queued).state).toBe('completed')
   })
 
   it('fails the run when the backend crashes mid-run', async () => {
@@ -601,6 +737,79 @@ describe('artifact runner', () => {
     expect(
       kernelEvents.filter((event) => event.type === 'artifact-item').length,
     ).toBeGreaterThanOrEqual(4)
+  })
+
+  it('waits for an in-flight prompt before releasing the queue on cancellation', async () => {
+    let resolveSubmit!: () => void
+    const firstSubmit = new Promise<void>((resolve) => {
+      resolveSubmit = resolve
+    })
+    vi.mocked(submitPrompt).mockImplementation(
+      async (_baseUrl: string, _deps: ComfyClientDeps, workflow: unknown, clientId: string) => {
+        if (submittedPrompts.length === 0) await firstSubmit
+        submittedPrompts.push({ workflow, clientId })
+      },
+    )
+    setArtifactRunnerDeps(deps())
+    const submitCallsBefore = vi.mocked(submitPrompt).mock.calls.length
+    const firstRequest = payload({
+      runId: 'submit-cancel-run',
+      params: { ...payload().params, batchSize: 1 },
+    })
+    const first = submitArtifactRun({ ...firstRequest, items: itemsFor(firstRequest) })
+    await vi.waitFor(() =>
+      expect(vi.mocked(submitPrompt).mock.calls.length).toBe(submitCallsBefore + 1),
+    )
+
+    const queued = submitArtifactRun(
+      payload({ runId: 'submit-cancel-queued', params: { ...payload().params, batchSize: 1 } }),
+      { queue: 'queue' },
+    )
+    cancelArtifactRun('submit-cancel-run')
+    expect(await Promise.race([first, Promise.resolve('pending')])).toBe('pending')
+    expect(vi.mocked(submitPrompt).mock.calls.length).toBe(submitCallsBefore + 1)
+
+    resolveSubmit()
+    expect((await first).state).toBe('cancelled')
+    await vi.waitFor(() =>
+      expect(vi.mocked(submitPrompt).mock.calls.length).toBe(submitCallsBefore + 2),
+    )
+    socketHandlers!.onJson({
+      type: 'executed',
+      data: {
+        node: '4',
+        output: { images: [{ filename: 'queued.png', subfolder: '', type: 'output' }] },
+      },
+    })
+    expect((await queued).state).toBe('completed')
+  })
+
+  it('does not settle until interrupt and queue cleanup finish', async () => {
+    let resolveInterrupt!: () => void
+    let resolveClear!: () => void
+    vi.mocked(interruptExecution).mockImplementationOnce(
+      async () =>
+        new Promise<void>((resolve) => {
+          resolveInterrupt = resolve
+        }),
+    )
+    vi.mocked(clearQueue).mockImplementationOnce(
+      async () =>
+        new Promise<void>((resolve) => {
+          resolveClear = resolve
+        }),
+    )
+    setArtifactRunnerDeps(deps())
+    const request = payload({ params: { ...payload().params, batchSize: 1 } })
+    const run = submitArtifactRun({ ...request, items: itemsFor(request) })
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(1))
+
+    cancelActiveArtifactRun()
+    expect(await Promise.race([run, Promise.resolve('pending')])).toBe('pending')
+    resolveInterrupt()
+    expect(await Promise.race([run, Promise.resolve('pending')])).toBe('pending')
+    resolveClear()
+    expect((await run).state).toBe('cancelled')
   })
 
   it('cancels a queued run by id without touching the active one', async () => {

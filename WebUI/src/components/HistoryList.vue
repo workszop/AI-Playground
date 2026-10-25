@@ -113,9 +113,7 @@ async function removeDraft() {
   if (draft.value) await history.remove(draft.value)
 }
 
-const currentLabel = computed(() =>
-  history.conversationScope === 'homeAgent' ? 'Home Agent' : mapModeToLabel(history.currentMode),
-)
+const currentLabel = computed(() => mapModeToLabel(history.currentMode))
 
 const chips = computed(() => [
   { value: 'current' as const, label: currentLabel.value },

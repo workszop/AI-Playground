@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { REMOTE_DOWNLOAD_GRANT, vramWarningGrantKey } from '@/types/permissionsIpc'
+import { vramWarningGrantKey } from '@/types/permissionsIpc'
 
 const files = vi.hoisted(() => ({ real: '', demo: '' }))
 const prompt = vi.hoisted(() => ({
@@ -43,51 +43,37 @@ afterEach(async () => {
 })
 
 describe('permissions policy (main)', () => {
-  it('asks the adapter for a desktop download when no remote turn is active', async () => {
-    prompt.requestPermissionsPrompt.mockImplementation(async (payload: unknown) => {
-      if ((payload as { kind: string }).kind === 'is-remote') return false
-      return undefined
-    })
+  it('always asks the desktop adapter directly for download consent', async () => {
     const models = [{ repo_id: 'test/model' }]
     await requestDownloadConsent(models)
-    const downloadCall = prompt.requestPermissionsPrompt.mock.calls.find(
-      ([payload]) => (payload as { kind: string }).kind === 'download',
+    expect(prompt.requestPermissionsPrompt).toHaveBeenCalledExactlyOnceWith(
+      { kind: 'download', models },
+      { onProgress: undefined, signal: undefined },
     )
-    expect(downloadCall?.[0]).toMatchObject({
-      kind: 'download',
-      models,
-      skipConfirmation: false,
-    })
   })
 
-  it('skips the in-channel question when the remote-download pre-grant exists', async () => {
-    await grantPermission(REMOTE_DOWNLOAD_GRANT, 'pre-grant')
-    prompt.requestPermissionsPrompt.mockImplementation(async (payload: unknown) => {
-      if ((payload as { kind: string }).kind === 'is-remote') return true
-      return undefined
-    })
-    await requestDownloadConsent([{ repo_id: 'test/model' }])
-    const downloadCall = prompt.requestPermissionsPrompt.mock.calls.find(
-      ([payload]) => (payload as { kind: string }).kind === 'download',
+  it('does not let a legacy remote-download grant bypass desktop consent', async () => {
+    await grantPermission('download:remote-turns', 'pre-grant')
+    const models = [{ repo_id: 'test/model' }]
+    await requestDownloadConsent(models)
+    expect(prompt.requestPermissionsPrompt).toHaveBeenCalledExactlyOnceWith(
+      { kind: 'download', models },
+      { onProgress: undefined, signal: undefined },
     )
-    expect(downloadCall?.[0]).toMatchObject({ skipConfirmation: true })
   })
 
-  it('does not skip confirmation on a remote turn without the pre-grant', async () => {
-    prompt.requestPermissionsPrompt.mockImplementation(async (payload: unknown) => {
-      if ((payload as { kind: string }).kind === 'is-remote') return true
-      return undefined
-    })
-    await requestDownloadConsent([{ repo_id: 'test/model' }])
-    const downloadCall = prompt.requestPermissionsPrompt.mock.calls.find(
-      ([payload]) => (payload as { kind: string }).kind === 'download',
+  it('preserves cancellation ownership and progress callbacks', async () => {
+    const controller = new AbortController()
+    const onProgress = vi.fn()
+    await requestDownloadConsent([], { signal: controller.signal, onProgress })
+    expect(prompt.requestPermissionsPrompt).toHaveBeenCalledExactlyOnceWith(
+      { kind: 'download', models: [] },
+      { signal: controller.signal, onProgress },
     )
-    expect(downloadCall?.[0]).toMatchObject({ skipConfirmation: false })
   })
 
-  it('treats a missing window as not-remote, then fails the download prompt', async () => {
-    prompt.requestPermissionsPrompt.mockImplementation(async (payload: unknown) => {
-      if ((payload as { kind: string }).kind === 'is-remote') throw new Error('No renderer window')
+  it('fails the download prompt when the window is unavailable', async () => {
+    prompt.requestPermissionsPrompt.mockImplementation(async () => {
       throw new Error('No renderer window available for the permission prompt')
     })
     await expect(requestDownloadConsent([{ repo_id: 'x' }])).rejects.toThrow('No renderer window')

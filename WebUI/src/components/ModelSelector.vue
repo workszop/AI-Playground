@@ -38,7 +38,7 @@ const currentModel = computed(() => {
 
 // User-driven picker controls: a case-insensitive substring search and a set of
 // capability filters toggled from the icon row. These narrow the list on top of
-// any preset-level requirements (Home Agent tool-calling, Phison large-MoE, …).
+// any preset-level requirements (tool-calling, Phison large-MoE, …).
 const open = ref(false)
 const search = ref('')
 const activeFilters = ref<Set<CapabilityKey>>(new Set())

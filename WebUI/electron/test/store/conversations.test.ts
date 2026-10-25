@@ -103,6 +103,30 @@ describe('useConversations hydration', () => {
     await vi.waitFor(() => expect(store.lastMainKey).toBe(draftKeys[0]))
   })
 
+  it('normalizes a saved Home Agent thread into an ordinary desktop chat', async () => {
+    api.bootstrap.mockResolvedValue(
+      okBootstrap([
+        {
+          id: '__aipg_home_agent__',
+          meta: { presetName: 'Home Agent', kind: 'homeAgent' },
+          ragHashes: [],
+          messages: [{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'legacy' }] }],
+        },
+      ]),
+    )
+    const { useConversations } = await import('@/assets/js/store/conversations')
+    const store = useConversations()
+
+    await store.init()
+
+    expect(store.conversationList.__aipg_home_agent__).toHaveLength(1)
+    expect(store.getThreadMeta('__aipg_home_agent__')).toMatchObject({
+      presetName: '',
+      kind: 'main',
+    })
+    expect(api.save).not.toHaveBeenCalled()
+  })
+
   it('migrates the legacy localStorage state once and drops the key', async () => {
     api.bootstrap.mockResolvedValue({ status: 'empty' })
     api.migrate.mockImplementation(async (payload: unknown) => {
@@ -275,15 +299,13 @@ describe('useConversations write-through', () => {
     expect(store.getThreadMeta(key)).toMatchObject({ presetName: 'Qwen', kind: 'main' })
   })
 
-  it('persists a Home Agent thread on create, before any content', async () => {
+  it('creates only ordinary desktop chat metadata', async () => {
     const store = await hydratedStore()
 
-    store.createConversation({ kind: 'homeAgent', presetName: 'Home Agent' })
+    const key = store.createConversation({ presetName: 'Assistant' })
 
-    expect(api.save).toHaveBeenCalledTimes(1)
-    expect(api.save.mock.calls[0][0]).toMatchObject({
-      meta: { kind: 'homeAgent', presetName: 'Home Agent' },
-    })
+    expect(store.getThreadMeta(key)).toMatchObject({ presetName: 'Assistant', kind: 'main' })
+    expect(api.save).not.toHaveBeenCalled()
   })
 
   it('does not write an empty main draft until it has content', async () => {

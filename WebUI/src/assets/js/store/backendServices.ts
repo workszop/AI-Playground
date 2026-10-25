@@ -12,7 +12,6 @@ import { connectKernelEventStream } from '@/assets/js/projection/kernelProjectio
 
 export const allBackendServiceNames = [
   'ai-backend',
-  'home-agent-backend',
   'qwen3-tts-backend',
   'whisper-backend',
   'llamacpp-backend',
@@ -44,7 +43,6 @@ export const useBackendServices = defineStore('backendServices', () => {
   )
   const lastSelectedDeviceIdPerBackend = ref<Record<BackendServiceName, string | null>>({
     'ai-backend': null,
-    'home-agent-backend': null,
     'qwen3-tts-backend': null,
     'whisper-backend': null,
     'comfyui-backend': null,
@@ -132,7 +130,6 @@ export const useBackendServices = defineStore('backendServices', () => {
   // Full version state (not persisted - computed from live data + overrides)
   const versionState = ref<BackendVersionState>({
     'ai-backend': {},
-    'home-agent-backend': {},
     'qwen3-tts-backend': {},
     'whisper-backend': {},
     'comfyui-backend': {},

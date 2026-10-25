@@ -1,15 +1,11 @@
-import type { ConfigChange } from '@/assets/js/tools/configureHomeAgentLogic'
-import type { LlmBackend } from '@/assets/js/store/textInference'
-
 /**
  * Main → renderer questions a chat tool needs answered.
  *
  * Chat tool bodies run in main. A handful of things genuinely belong to the
  * window, and this is how main asks for them rather than handing the whole tool
  * back: the speech engine seam (`speechIO`), where a missing voice model opens
- * the download prompt; Chromium's audio decoder, which turns a non-WAV
- * attachment into something an STT server takes; the Home Agent confirmation
- * card; and writing an approved settings change into the live stores.
+ * the download prompt; and Chromium's audio decoder, which turns a non-WAV
+ * attachment into something an STT server takes.
  *
  * The wire shape is `artifact:request`'s: main sends, the current window
  * replies by `requestId`, and `{ progress: true }` reports a phase without
@@ -42,27 +38,14 @@ export type SpeechClipPayload = {
   language?: string
 }
 
-/** What applying an approved Home Agent change reports back. */
-export type HomeAgentApplyResult = {
-  /** A model / backend / device / context change means the backend reloads. */
-  backendChanged: boolean
-}
-
 export type ChatAskBody =
   | { kind: 'speech-synthesize'; text: string; voice: SpeechVoiceSelection }
   | { kind: 'speech-transcribe'; audioBase64: string; mediaType?: string }
-  | {
-      kind: 'home-agent-confirm'
-      conversationKey: string
-      toolCallId?: string
-      summaryMarkdown: string
-    }
-  | { kind: 'home-agent-apply'; targetBackend: LlmBackend; changes: ConfigChange[] }
 
 export type ChatAskPayload = ChatAskBody & { requestId: string }
 
 /** Phases a long request reports while it runs, for the tool's activity. */
-export type ChatAskPhase = 'loading-model' | 'generating' | 'awaiting-confirmation' | 'applying'
+export type ChatAskPhase = 'loading-model' | 'generating'
 
 export type ChatAnswerPayload =
   | { requestId: string; progress: true; phase?: ChatAskPhase }

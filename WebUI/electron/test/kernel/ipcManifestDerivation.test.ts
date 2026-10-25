@@ -11,27 +11,6 @@ import {
 // trivially green. They pin the three `member`-override placement rules.
 
 describe('channel manifest bridge-path derivation', () => {
-  it('places a dotted-member channel at its cross-group path', () => {
-    expectTypeOf<ElectronApi['homeAgent']['saveDocument']>().toEqualTypeOf<
-      BridgeMemberFor<'saveHomeAgentDocument'>
-    >()
-    expectTypeOf<ElectronApi>().not.toHaveProperty('saveHomeAgentDocument')
-  })
-
-  it('places a dotted member inside a nested sub-group', () => {
-    expectTypeOf<ElectronApi['homeAgent']['channel']['saveConfig']>().toEqualTypeOf<
-      BridgeMemberFor<'channel:saveConfig'>
-    >()
-    expectTypeOf<NamespaceBridge<'homeAgent'>>().not.toHaveProperty('saveConfig')
-  })
-
-  it('derives ns:sub:leaf channels two levels deep without an override', () => {
-    expectTypeOf<ElectronApi['homeAgent']['localWeb']['getUrls']>().toEqualTypeOf<
-      BridgeMemberFor<'homeAgent:localWeb:getUrls'>
-    >()
-    expectTypeOf<NamespaceBridge<'homeAgent'>>().not.toHaveProperty('getUrls')
-  })
-
   it('places a flat-flagged namespaced channel at the top level', () => {
     expectTypeOf<ElectronApi['setLifecycleBusy']>().toEqualTypeOf<
       BridgeMemberFor<'lifecycle:busy'>
@@ -60,9 +39,6 @@ describe('channel manifest bridge-path derivation', () => {
   it('keeps every migrated group member reachable through its derived path', () => {
     expectTypeOf<ElectronApi['webBrowser']['navigate']>().toEqualTypeOf<
       BridgeMemberFor<'webBrowser:navigate'>
-    >()
-    expectTypeOf<ElectronApi['homeAgent']['channel']['send']>().toEqualTypeOf<
-      BridgeMemberFor<'channel:send'>
     >()
   })
 })
@@ -136,9 +112,6 @@ describe('channel manifest bridge-path uniqueness', () => {
 
   it('mirrors the type-level placement the pinned rows above assert', () => {
     const pathOf = (name: keyof typeof CHANNELS) => bridgePathOf(name, CHANNELS[name] as RowLike)
-    expect(pathOf('saveHomeAgentDocument')).toEqual(['homeAgent', 'saveDocument'])
-    expect(pathOf('channel:saveConfig')).toEqual(['homeAgent', 'channel', 'saveConfig'])
-    expect(pathOf('homeAgent:localWeb:getUrls')).toEqual(['homeAgent', 'localWeb', 'getUrls'])
     expect(pathOf('lifecycle:busy')).toEqual(['setLifecycleBusy'])
     expect(pathOf('agentMode:toolResult')).toEqual(['agentMode', 'submitToolResult'])
     expect(pathOf('webBrowser:stateChanged')).toEqual(['webBrowser', 'onStateChanged'])

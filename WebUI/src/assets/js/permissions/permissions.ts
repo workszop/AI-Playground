@@ -1,35 +1,14 @@
 import { useDialogStore } from '../store/dialogs'
 import { cloneForIpc } from '@/lib/cloneForIpc'
-import { REMOTE_DOWNLOAD_GRANT, vramWarningGrantKey } from '@/types/permissionsIpc'
+import { vramWarningGrantKey } from '@/types/permissionsIpc'
 import { createCancellation } from '../errors/appError'
 
-/**
- * Permissions — the consent layer (§4.7 of docs/architecture-target.md, step 13).
- * Policy (grant lookup, skip-confirmation) lives in main. This module is the
- * named-verb facade the rest of the renderer calls:
- *
- * - `requestDownload` — model-download consent. Main decides whether a remote
- *   Home Agent turn may skip the in-channel question (`download:remote-turns`
- *   pre-grant); the renderer adapter shows the modal or routes to the channel.
- * - `requestVramWarning` — the gated high-memory / video-VRAM preset warning.
- *   "Do not show again" becomes a `remember` grant in main.
- * - `notify` — one-way guidance (an install-needed notice whose Confirm opens
- *   the setup wizard). No grant, nothing to remember; stays renderer-local.
- *
- * There is no silent auto-allow. Named verbs stay; grant vocabulary is not
- * this row. The Home Agent store is never imported here — a remote turn
- * registers a port (`remoteTurnPort.ts`) that the adapter consults.
- */
-
-export { REMOTE_DOWNLOAD_GRANT, vramWarningGrantKey }
+export { vramWarningGrantKey }
 
 /**
  * Ask consent for downloading the given models and run the download.
  * Resolves when the download completed; rejects when it was declined or
- * failed. On a remote Home Agent turn the request is answered in-channel
- * (mirrored on the desktop); the `download:remote-turns` pre-grant skips the
- * in-channel question — gated models are still declined, progress still
- * streams to the channel.
+ * failed. Downloads always require the desktop confirmation modal.
  */
 export async function requestDownload(models: DownloadModelParam[]): Promise<void> {
   const api = window.electronAPI?.permissions

@@ -51,7 +51,6 @@ function conversation(overrides: Partial<ConversationEntry> = {}): ConversationE
     id: '1000',
     title: 'a haiku about ports',
     mode: 'chat',
-    threadKind: 'main',
     presetName: 'Assistant',
     createdAt: 1_000,
     updatedAt: 2_000,
@@ -183,11 +182,10 @@ describe('matchesFilter', () => {
   const current = (entry: HistoryEntry, currentMode: ModeType, agentPresetName = '') =>
     matchesFilter(entry, { filter: 'current', currentMode, agentPresetName })
 
-  it('lists only the current mode, and never a Home Agent thread', () => {
+  it('lists only the current mode', () => {
     expect(current(conversation(), 'chat')).toBe(true)
     expect(current(conversation(), 'audio')).toBe(false)
     expect(current(conversation({ mode: 'audio' }), 'audio')).toBe(true)
-    expect(current(conversation({ threadKind: 'homeAgent' }), 'chat')).toBe(false)
     expect(current(media(), 'imageGen')).toBe(true)
     expect(current(media(), 'chat')).toBe(false)
     expect(current(media({ origin: 'tool' }), 'imageGen')).toBe(false)
@@ -203,19 +201,10 @@ describe('matchesFilter', () => {
   it('shows every kind under All, minus media a transcript already carries', () => {
     const all = (entry: HistoryEntry) =>
       matchesFilter(entry, { filter: 'all', currentMode: 'chat', agentPresetName: 'Agent' })
-    expect(all(conversation({ threadKind: 'homeAgent' }))).toBe(true)
+    expect(all(conversation())).toBe(true)
     expect(all(agent())).toBe(true)
     expect(all(media())).toBe(true)
     expect(all(media({ origin: 'tool' }))).toBe(false)
-  })
-
-  it('swaps the current-mode list for the remote one while a remote thread is open', () => {
-    const remote = (entry: HistoryEntry) =>
-      matchesFilter(entry, { filter: 'current', currentMode: 'chat', threadScope: 'homeAgent' })
-    expect(remote(conversation({ threadKind: 'homeAgent' }))).toBe(true)
-    expect(remote(conversation())).toBe(false)
-    expect(remote(agent())).toBe(false)
-    expect(remote(media())).toBe(false)
   })
 })
 
@@ -246,12 +235,6 @@ describe('isEmptyDraft', () => {
     expect(matchesFilter(draft, { ...context, filter: 'all' })).toBe(true)
     expect(matchesFilter(draft, { filter: 'current', currentMode: 'chat' })).toBe(false)
     expect(matchesFilter(draft, { filter: 'all', currentMode: 'chat' })).toBe(false)
-    // A remote bucket nobody wrote to is hidden on the same terms.
-    const remote = conversation({ id: '3000', threadKind: 'homeAgent', messages: [] })
-    expect(matchesFilter(remote, { filter: 'all', currentMode: 'chat' })).toBe(false)
-    expect(
-      matchesFilter(remote, { filter: 'all', currentMode: 'chat', activeConversationId: '3000' }),
-    ).toBe(true)
   })
 })
 

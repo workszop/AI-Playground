@@ -166,7 +166,7 @@ Pierwsze uruchomienie zrób sam, zanim użytkownik zacznie korzystać z aplikacj
    - Llama.cpp jest wymagany, bo działa na nim filtr bezpieczeństwa. Bez niego każda wiadomość na czacie i każdy opis obrazu zostaną zablokowane.
    - ComfyUI jest potrzebny do generowania obrazów. Wewnątrz niego działa filtr obrazów.
    - OpenVINO zostaw z ustawieniem domyślnym.
-   - Home Agent i Hybrid Cloud zostaw wyłączone. Zmiany Kids-safe ich nie obejmują, a Hybrid Cloud wysyła rozmowy do usług w internecie.
+   - Hybrid Cloud zostaw wyłączone. Zmiany Kids-safe go nie obejmują, a Hybrid Cloud wysyła rozmowy do usług w internecie.
    - Audio jest opcjonalne. Mowa odczytuje tekst, który czat już przefiltrował, ale samego dźwięku nic osobno nie filtruje.
 
    Kliknij **Install and Continue**. Potrzebne jest połączenie z internetem bez ograniczeń (firmowe VPN-y często je psują). Instalacja trwa od kilku minut do znacznie dłużej przy wolnym łączu. Nie pozwól komputerowi przejść w stan uśpienia.

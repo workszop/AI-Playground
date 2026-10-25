@@ -28,13 +28,6 @@
       <DemoModeIndicator />
     </div>
     <div class="flex justify-between items-center gap-5">
-      <HomeAgentToggle
-        v-if="
-          globalSetup.loadingState === 'running' &&
-          (promptStore.getCurrentMode() === 'chat' || promptStore.getCurrentMode() === 'imageGen')
-        "
-        class="self-center"
-      />
       <button
         v-if="showDebugSettings"
         :title="languages.COM_SETTINGS"
@@ -334,7 +327,6 @@
       <img v-else-if="theme.active === 'dark'" class="h-8" src="@/assets/svg/intel.svg" />
     </div>
   </footer>
-  <!-- Outside the running-only main: Home Agent setup lives in the wizard. -->
   <warning-dialog v-show="dialogStore.warningDialogVisible"></warning-dialog>
 </template>
 
@@ -375,7 +367,6 @@ import DemoModeOverlayDriverJsRef from './components/DemoModeOverlayDriverJs.vue
 import DemoModeBlocker from '@/components/DemoModeBlocker.vue'
 import DemoModeNotificationDots from '@/components/DemoModeNotificationDots.vue'
 import DemoModeAutoresetDialog from '@/components/DemoModeAutoresetDialog.vue'
-import HomeAgentToggle from '@/components/HomeAgentToggle.vue'
 import ContextualHelpLayer from '@/components/ContextualHelpLayer.vue'
 import { useContextualHelp } from '@/assets/js/store/contextualHelp'
 import { usePresetSwitching } from '@/assets/js/store/presetSwitching'

@@ -14,8 +14,6 @@ const qwenModelLoaded = ref(false)
 
 const ensureWhisperReadyMock = vi.fn(async () => ({ downloadPrompted: false }))
 const ensureStandaloneReadyMock = vi.fn(async () => ({ downloadPrompted: false }))
-const ensureStandaloneServerRunningMock = vi.fn(async () => {})
-const ensureTranscriptionServerRunningMock = vi.fn(async () => {})
 const resolveTranscriptionMock = vi.fn(
   async (..._args: unknown[]): Promise<{ baseURL: string; model: string; apiKey: string } | null> =>
     null,
@@ -34,7 +32,6 @@ const resolveSpeechMock = vi.fn(
 )
 const synthesizeToWavMock = vi.fn(async () => ({ audioBase64: 'Tts9', voice: 'af_heart' }))
 
-const qwenIsModelInstalledMock = vi.fn(async () => true)
 const qwenIsModelLoadedMock = vi.fn(async () => qwenModelLoaded.value)
 const qwenEnsureModelLoadedMock = vi.fn(async () => {})
 const qwenSynthesizeMock = vi.fn(async () => ({
@@ -65,8 +62,6 @@ vi.mock('@/assets/js/store/speechToText', () => ({
     available: sttAvailable.value,
     ensureWhisperReady: ensureWhisperReadyMock,
     ensureStandaloneReady: ensureStandaloneReadyMock,
-    ensureStandaloneServerRunning: ensureStandaloneServerRunningMock,
-    ensureTranscriptionServerRunning: ensureTranscriptionServerRunningMock,
     resolveTranscription: resolveTranscriptionMock,
   }),
 }))
@@ -84,7 +79,6 @@ vi.mock('@/assets/js/store/textToSpeech', () => ({
 vi.mock('@/assets/js/store/qwen3TextToSpeech', () => ({
   useQwen3TextToSpeech: () => ({
     isBackendSetUp: () => qwenBackendSetUp.value,
-    isModelInstalled: qwenIsModelInstalledMock,
     isModelLoaded: qwenIsModelLoadedMock,
     ensureModelLoaded: qwenEnsureModelLoadedMock,
     synthesize: qwenSynthesizeMock,
@@ -113,7 +107,6 @@ const {
   isSpeaking,
   pendingVoiceTurn,
   readyTranscriptionForInput,
-  readyTranscriptionUnattended,
   saveSpeechClip,
   speak,
   speakRepliesAvailable,
@@ -165,7 +158,6 @@ describe('speechIO (Speech I/O adapter)', () => {
       voice: 'af_heart',
       apiKey: '',
     })
-    qwenIsModelInstalledMock.mockResolvedValue(true)
     vi.stubGlobal('window', { electronAPI: { saveGeneratedAudio: saveGeneratedAudioMock } })
     ;(globalThis as Record<string, unknown>).Audio = FakeAudio
     ;(globalThis.URL as typeof globalThis.URL & { revokeObjectURL?: unknown }).revokeObjectURL =
@@ -196,19 +188,6 @@ describe('speechIO (Speech I/O adapter)', () => {
       expect(ensureWhisperReadyMock).not.toHaveBeenCalled()
       expect(ensureStandaloneReadyMock).not.toHaveBeenCalled()
       expect(ready).toEqual({ downloadPrompted: false })
-    })
-
-    it('readies unattended standalone by starting the sidecar only', async () => {
-      sttEngine.value = 'standalone'
-      await readyTranscriptionUnattended()
-      expect(ensureStandaloneServerRunningMock).toHaveBeenCalledTimes(1)
-      expect(ensureTranscriptionServerRunningMock).not.toHaveBeenCalled()
-    })
-
-    it('readies unattended non-standalone engines through the OVMS server path', async () => {
-      await readyTranscriptionUnattended()
-      expect(ensureTranscriptionServerRunningMock).toHaveBeenCalledTimes(1)
-      expect(ensureStandaloneServerRunningMock).not.toHaveBeenCalled()
     })
 
     it('exposes STT availability for the mic gate', () => {
@@ -310,21 +289,6 @@ describe('speechIO (Speech I/O adapter)', () => {
         mode: 'custom_voice',
       })
     })
-
-    it('bails out unattended when the backend is not installed', async () => {
-      qwenBackendSetUp.value = false
-      const clip = await synthesizeClip({ text: 'hello', unattended: true })
-      expect(clip).toBeNull()
-      expect(qwenSynthesizeMock).not.toHaveBeenCalled()
-    })
-
-    it('bails out unattended when the model is missing', async () => {
-      qwenIsModelInstalledMock.mockResolvedValueOnce(false)
-      const clip = await synthesizeClip({ text: 'hello', unattended: true })
-      expect(clip).toBeNull()
-      expect(qwenEnsureModelLoadedMock).not.toHaveBeenCalled()
-      expect(qwenSynthesizeMock).not.toHaveBeenCalled()
-    })
   })
 
   describe('synthesizeClip (Kokoro / external)', () => {
@@ -342,40 +306,6 @@ describe('speechIO (Speech I/O adapter)', () => {
       })
       expect(qwenSynthesizeMock).not.toHaveBeenCalled()
     })
-
-    it('bails out unattended when no non-Qwen engine is available', async () => {
-      ttsEngine.value = 'kokoro'
-      ttsAvailable.value = false
-      const clip = await synthesizeClip({ text: 'hello', unattended: true })
-      expect(clip).toBeNull()
-      expect(ensureSpeechServerRunningMock).not.toHaveBeenCalled()
-      expect(synthesizeSpeechMock).not.toHaveBeenCalled()
-    })
-
-    it('synthesizes unattended via the dialog-free server start and WAV format', async () => {
-      ttsEngine.value = 'kokoro'
-      const clip = await synthesizeClip({ text: 'hello', unattended: true, format: 'wav' })
-      expect(ensureSpeechServerRunningMock).toHaveBeenCalledTimes(1)
-      expect(synthesizeSpeechMock).toHaveBeenCalledWith(
-        'hello',
-        expect.objectContaining({ baseURL: 'http://localhost:29000/v3' }),
-        { format: 'wav' },
-      )
-      expect(clip).toMatchObject({
-        audioBase64: 'AQID',
-        mediaType: 'audio/wav',
-        voice: 'af_heart',
-        engine: 'kokoro',
-      })
-    })
-
-    it('returns null unattended when no endpoint resolves', async () => {
-      ttsEngine.value = 'kokoro'
-      resolveSpeechMock.mockResolvedValueOnce(null)
-      const clip = await synthesizeClip({ text: 'hello', unattended: true })
-      expect(clip).toBeNull()
-      expect(synthesizeSpeechMock).not.toHaveBeenCalled()
-    })
   })
 
   describe('desktop playback (speak)', () => {
@@ -384,7 +314,6 @@ describe('speechIO (Speech I/O adapter)', () => {
       expect(synthesizeSpeechMock).toHaveBeenCalledWith(
         'hello there',
         expect.objectContaining({ model: 'kokoro' }),
-        undefined,
       )
       expect(bytesToBase64Mock).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]))
       expect(bytesToBlobUrlMock).toHaveBeenCalledWith(expect.any(Uint8Array), 'audio/wav')

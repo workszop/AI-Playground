@@ -1,5 +1,5 @@
 """Shared loopback + per-launch-token authentication for AI Playground's local
-Python backends (ai-backend, home-agent, ...).
+Python backends such as the local model-management service.
 
 Each backend binds to 127.0.0.1, but on a shared host any local peer can still
 reach the port. We therefore require requests to (a) originate from a loopback

@@ -7,29 +7,14 @@ import { currentPresetName } from '@/lib/presetRenames'
 import { makeForwardPersist } from '@/lib/ipcPersist'
 import { cloneForIpc } from '@/lib/cloneForIpc'
 import { useErrors } from './errors'
-import type { ConversationBootstrap, ConversationLegacyState } from '@/types/conversationIpc'
+import type {
+  ConversationBootstrap,
+  ConversationLegacyState,
+  ConversationThreadMeta as IpcConversationThreadMeta,
+} from '@/types/conversationIpc'
 
-/**
- * Legacy fixed key for the original singleton Telegram thread. Kept only as a
- * migration token: at hydrate time we backfill `conversationThreadMeta` for it
- * so it shows up as a normal Home Agent thread alongside any newly created
- * remote conversations. Do NOT use this in new code — addressing happens via
- * `homeAgent.activeRemoteConversationKey` and `conversationThreadMeta`.
- */
+/** Legacy fixed key for the original remote thread. It is kept as a normal chat. */
 export const HOME_AGENT_CONVERSATION_KEY = '__aipg_home_agent__'
-
-export const HOME_AGENT_CONVERSATION_TITLE = 'Home Agent'
-
-/**
- * Logical chat preset id for Home Agent inference. Lives in
- * `modes/base/presets/home-agent-chat.json`. Surfaces in the standard chat
- * preset picker: selecting it from `SettingsChat` jumps to the most recent
- * Home Agent conversation; selecting another preset off a Home Agent thread
- * spawns a fresh main conversation.
- */
-export const HOME_AGENT_CHAT_PRESET_NAME = 'Home Agent'
-
-export type ThreadKind = 'main' | 'homeAgent'
 
 /**
  * Per-conversation inference profile snapshot. Stamped on every outbound
@@ -39,13 +24,35 @@ export type ThreadKind = 'main' | 'homeAgent'
 export type ConversationThreadMeta = {
   presetName: string
   variant?: string | null
-  kind?: ThreadKind
+  kind?: 'main'
 }
 
 export type CreateConversationOptions = {
-  kind?: ThreadKind
   presetName?: string
   variant?: string | null
+}
+
+const LEGACY_HOME_AGENT_PRESET_NAME = 'Home Agent'
+
+/** Convert metadata written by the removed remote chat into a desktop thread. */
+export function normalizeConversationThreadMeta(
+  meta: IpcConversationThreadMeta | ConversationThreadMeta | null | undefined,
+): ConversationThreadMeta | undefined {
+  if (!meta) return undefined
+  return {
+    ...meta,
+    presetName: meta.presetName === LEGACY_HOME_AGENT_PRESET_NAME ? '' : meta.presetName,
+    kind: 'main',
+  }
+}
+
+function normalizeLegacyState(legacy: ConversationLegacyState): ConversationLegacyState {
+  const meta: Record<string, IpcConversationThreadMeta> = {}
+  for (const [key, value] of Object.entries(legacy.conversationThreadMeta)) {
+    const normalized = normalizeConversationThreadMeta(value)
+    if (normalized) meta[key] = normalized
+  }
+  return { ...legacy, conversationThreadMeta: meta }
 }
 
 // The old Pinia-persist key (store id). Read exactly once — the one-shot
@@ -67,13 +74,7 @@ export const useConversations = defineStore('conversations', () => {
   const activeKey = ref('')
   const activeConversation = computed(() => conversationList.value[activeKey.value])
 
-  /**
-   * Most-recent main-kind thread the user was on. Mirrors
-   * `homeAgent.activeRemoteConversationKey` for the Home Agent side so the
-   * Local/Home Agent history switch can restore the user's "last active"
-   * conversation per category instead of always snapping to the newest
-   * thread by insertion order.
-   */
+  /** Most-recent desktop thread the user was on. */
   const lastMainKey = ref<string | null>(null)
 
   /** Set once `init()` has hydrated (or migrated) — gates every write-through. */
@@ -150,18 +151,16 @@ export const useConversations = defineStore('conversations', () => {
   }
 
   function setThreadMeta(conversationKey: string, meta: ConversationThreadMeta) {
+    const normalized = normalizeConversationThreadMeta(meta)
+    if (!normalized) return
     conversationThreadMeta.value[conversationKey] = {
       ...conversationThreadMeta.value[conversationKey],
-      ...meta,
+      ...normalized,
     }
   }
 
   function getThreadMeta(conversationKey: string): ConversationThreadMeta | undefined {
     return conversationThreadMeta.value[conversationKey]
-  }
-
-  function getThreadKind(conversationKey: string): ThreadKind {
-    return conversationThreadMeta.value[conversationKey]?.kind ?? 'main'
   }
 
   function getThreadRagHashes(conversationKey: string): string[] {
@@ -179,7 +178,7 @@ export const useConversations = defineStore('conversations', () => {
   watch(
     () => activeKey.value,
     (k) => {
-      if (k && conversationList.value[k] && getThreadKind(k) === 'main') {
+      if (k && conversationList.value[k]) {
         lastMainKey.value = k
         forwardPersist(() => window.electronAPI.conversations.saveLastMainKey(k))
       }
@@ -189,29 +188,24 @@ export const useConversations = defineStore('conversations', () => {
 
   /**
    * Allocate a new conversation bucket and (optionally) seed thread metadata.
-   * Returns the new conversation key. Used by both the main Chat "+" flow
-   * and the Home Agent /new command.
+   * Returns the new conversation key.
    */
   function createConversation(options: CreateConversationOptions = {}): string {
     const newKey = new Date().getTime().toString()
     conversationList.value[newKey] = []
-    if (options.presetName || options.kind) {
+    if (options.presetName) {
       conversationThreadMeta.value[newKey] = {
         presetName: options.presetName ?? '',
         variant: options.variant ?? null,
-        kind: options.kind ?? 'main',
+        kind: 'main',
       }
     }
-    // Home Agent threads are addressable from the channel before their first
-    // message (`/history` lists them), so they persist immediately. A main
-    // draft stays in memory until it has content to write.
-    if (options.kind === 'homeAgent') saveThread(newKey)
     return newKey
   }
 
   function addNewConversation() {
     const list = conversationList.value
-    const newKey = addNewConversationIfLatestIsNotEmpty(list, conversationThreadMeta.value)
+    const newKey = addNewConversationIfLatestIsNotEmpty(list)
     activeKey.value = newKey
     return newKey
   }
@@ -231,7 +225,8 @@ export const useConversations = defineStore('conversations', () => {
     const rag: Record<string, string[]> = {}
     for (const thread of bootstrap.threads) {
       list[thread.id] = thread.messages as AipgUiMessage[]
-      if (thread.meta) meta[thread.id] = thread.meta
+      const normalizedMeta = normalizeConversationThreadMeta(thread.meta)
+      if (normalizedMeta) meta[thread.id] = normalizedMeta
       if (thread.ragHashes.length > 0) rag[thread.id] = thread.ragHashes
     }
     conversationList.value = list
@@ -247,12 +242,12 @@ export const useConversations = defineStore('conversations', () => {
     try {
       const parsed = JSON.parse(raw) as Partial<ConversationLegacyState>
       if (!parsed || typeof parsed !== 'object' || !parsed.conversationList) return null
-      return {
+      return normalizeLegacyState({
         conversationList: parsed.conversationList,
         conversationThreadMeta: parsed.conversationThreadMeta ?? {},
         conversationRagSelection: parsed.conversationRagSelection ?? {},
         lastMainKey: parsed.lastMainKey ?? null,
-      }
+      })
     } catch {
       return null
     }
@@ -275,7 +270,7 @@ export const useConversations = defineStore('conversations', () => {
         ) {
           const legacy = readLegacyState()
           if (legacy && Object.keys(legacy.conversationList).length > 0) {
-            bootstrap = await window.electronAPI.conversations.migrate(legacy)
+            bootstrap = await window.electronAPI.conversations.migrate(normalizeLegacyState(legacy))
           }
         }
         // Files own the threads: drop the Pinia key. Keep it when migrate
@@ -310,15 +305,13 @@ export const useConversations = defineStore('conversations', () => {
       }
       if (bootstrap) hydrateFrom(bootstrap)
 
-      // Backfill legacy meta first so the helper below can correctly skip
-      // Home Agent threads when looking for the "latest empty MAIN" tail.
-      backfillLegacyHomeAgentThreadMeta(conversationList.value, conversationThreadMeta.value)
+      normalizeLegacyThreadMetadata(conversationThreadMeta.value)
       // A thread names the preset it was held with; a renamed preset no longer
       // answers to that name, which would leave the thread's preset unresolved.
       followRenamedPresets(conversationThreadMeta.value)
       // A session always opens on an empty main draft; it materializes on
       // disk with its first content.
-      addNewConversationIfLatestIsNotEmpty(conversationList.value, conversationThreadMeta.value)
+      addNewConversationIfLatestIsNotEmpty(conversationList.value)
       hydrated.value = true
     })()
     return initPromise
@@ -326,18 +319,9 @@ export const useConversations = defineStore('conversations', () => {
 
   watchEffect(() => {
     if (Object.keys(conversationList.value).includes(activeKey.value)) return
-    // Prefer the latest MAIN thread so app launch doesn't drop the user into
-    // a Home Agent thread (which would also flip the desktop preset to
-    // Home Agent via the activeKey watcher in textInference).
+    // Prefer the latest desktop thread on app launch.
     const keys = Object.keys(conversationList.value)
-    const meta = conversationThreadMeta.value
-    let fallback: string | undefined
-    for (let i = keys.length - 1; i >= 0; i--) {
-      if (meta[keys[i]]?.kind === 'homeAgent') continue
-      fallback = keys[i]
-      break
-    }
-    if (!fallback) fallback = keys.at(-1)
+    const fallback = keys.at(-1)
     if (!fallback) return
     activeKey.value = fallback
   })
@@ -360,7 +344,6 @@ export const useConversations = defineStore('conversations', () => {
     ensureConversationBucket,
     setThreadMeta,
     getThreadMeta,
-    getThreadKind,
     getThreadRagHashes,
     setThreadRagHashes,
     createConversation,
@@ -368,35 +351,13 @@ export const useConversations = defineStore('conversations', () => {
   }
 })
 
-/**
- * Find or allocate the "current empty main bucket" — i.e. the most recently
- * inserted MAIN-kind conversation, reused when empty so we don't accumulate
- * a long tail of empty drafts.
- *
- * Home Agent threads are intentionally skipped: they form a separate logical
- * list (driven by Telegram /new and the bundled Home Agent preset). Reusing
- * an empty Home Agent thread as "the new main thread" would silently retitle
- * a remote chat AND, via the activeKey watcher in `textInference`, snap the
- * desktop preset back to Home Agent — observable as "first click on another
- * preset bounces back, second click sticks".
- */
-function addNewConversationIfLatestIsNotEmpty(
-  list: Record<string, AipgUiMessage[]>,
-  meta?: Record<string, ConversationThreadMeta>,
-): string {
-  const isHomeAgent = (key: string) => meta?.[key]?.kind === 'homeAgent'
-
+/** Find or allocate the current empty desktop bucket. */
+function addNewConversationIfLatestIsNotEmpty(list: Record<string, AipgUiMessage[]>): string {
   const keys = Object.keys(list)
-  let latestMainKey: string | undefined
-  for (let i = keys.length - 1; i >= 0; i--) {
-    const k = keys[i]
-    if (isHomeAgent(k)) continue
-    latestMainKey = k
-    break
-  }
+  const latestKey = keys.at(-1)
 
-  if (latestMainKey && list[latestMainKey].length === 0) {
-    return latestMainKey
+  if (latestKey && list[latestKey].length === 0) {
+    return latestKey
   }
 
   const newKey = new Date().getTime().toString()
@@ -404,22 +365,10 @@ function addNewConversationIfLatestIsNotEmpty(
   return newKey
 }
 
-/**
- * Migrate the legacy singleton Home Agent thread to the new metadata model so
- * it shows up via `/history` and the desktop history list as a normal Home
- * Agent conversation.
- */
-function backfillLegacyHomeAgentThreadMeta(
-  list: Record<string, AipgUiMessage[]>,
-  meta: Record<string, ConversationThreadMeta>,
-) {
-  if (!list[HOME_AGENT_CONVERSATION_KEY]) return
-  if (meta[HOME_AGENT_CONVERSATION_KEY]?.kind === 'homeAgent') return
-  meta[HOME_AGENT_CONVERSATION_KEY] = {
-    ...meta[HOME_AGENT_CONVERSATION_KEY],
-    presetName: HOME_AGENT_CHAT_PRESET_NAME,
-    variant: null,
-    kind: 'homeAgent',
+function normalizeLegacyThreadMetadata(meta: Record<string, ConversationThreadMeta>): void {
+  for (const [key, value] of Object.entries(meta)) {
+    const normalized = normalizeConversationThreadMeta(value)
+    if (normalized) meta[key] = normalized
   }
 }
 

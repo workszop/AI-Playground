@@ -1045,7 +1045,6 @@ describe('turn streaming', () => {
       }),
       awaitChatWindow: vi.fn(async () => {}),
       stopOvmsImageServer: vi.fn(async () => {}),
-      notifyHomeAgentUpstreamReady: vi.fn(),
     })
     const readiness = { serviceName: 'llamacpp-backend', llmModelName: 'test-model' }
     expect(await manager.startAgentTurn('t1', 'hello', configFor({ readiness }))).toEqual({
@@ -1081,7 +1080,6 @@ describe('turn streaming', () => {
       }),
       awaitChatWindow: vi.fn(async () => {}),
       stopOvmsImageServer: vi.fn(async () => {}),
-      notifyHomeAgentUpstreamReady: vi.fn(),
     })
     expect(await manager.startAgentTurn('t1', 'hello', configFor())).toEqual({ success: true })
     expect(submitTextRequest).toHaveBeenCalledWith(
@@ -1105,7 +1103,6 @@ describe('turn streaming', () => {
       }),
       awaitChatWindow: vi.fn(async () => {}),
       stopOvmsImageServer: vi.fn(async () => {}),
-      notifyHomeAgentUpstreamReady: vi.fn(),
     })
     expect(
       await manager.startAgentTurn(

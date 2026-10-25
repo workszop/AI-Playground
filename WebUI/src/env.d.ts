@@ -395,7 +395,6 @@ type BackendServiceName =
   | 'comfyui-backend'
   | 'llamacpp-backend'
   | 'openvino-backend'
-  | 'home-agent-backend'
   | 'qwen3-tts-backend'
   | 'whisper-backend'
 

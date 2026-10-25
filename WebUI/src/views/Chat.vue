@@ -365,9 +365,8 @@
                 :conversation-key="conversations.activeKey"
               />
 
-              <!-- Inline human-in-the-loop confirmation (e.g. Home Agent self-config).
-                   Mirrors remote-channel confirmations into the desktop window so
-                   the app never looks stuck while a tool awaits approval. -->
+              <!-- Inline human-in-the-loop confirmation keeps the app responsive
+                   while a tool awaits approval. -->
               <ChatConfirmation
                 v-if="i === activeConversation.length - 1 && hasPendingConfirmation"
                 :conversation-key="conversations.activeKey"
@@ -576,9 +575,7 @@ const hasActiveChatActivity = computed(
   () => activities.chatActivity(conversations.activeKey, ['generation']) !== null,
 )
 
-// A tool (e.g. Home Agent self-config) is awaiting an inline yes/no for the
-// active conversation. Drives the ChatConfirmation card; also mirrors a pending
-// remote-channel confirmation into the desktop window.
+// A tool is awaiting an inline yes/no for the active conversation.
 const hasPendingConfirmation = computed(
   () => confirmations.forConversation(conversations.activeKey) !== null,
 )

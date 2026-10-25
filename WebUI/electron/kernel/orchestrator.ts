@@ -18,7 +18,7 @@
 //   skip-when-queued rule (a spritesheet costs one swap, not one per sprite),
 //   and the wait for open chat HTTP (and unrelated text occupancy) before
 //   stopping a backend mid-stream — no proceed-anyway bound.
-// - chat readiness admission: Chat, Agent, and Home Agent `/load` occupy as
+// - chat readiness admission: Chat and Agent `/load` occupy as
 //   `text` requests first; `ensureChatBackendReady` then loads with
 //   `skipGpuAdmission` because the window wait already happened.
 //
@@ -221,7 +221,7 @@ function unrelatedLocalTextOpen(conversationKey?: string): boolean {
 /**
  * Submits a resolved run. The prompt is checked first, before the run is
  * queued or takes the GPU, so the guard never has to start inside the media
- * window. `queue: 'fail-fast'` (panel / Home Agent) refuses while anything is
+ * window. `queue: 'fail-fast'` (panel) refuses while anything is
  * executing or queued, and while a local chat turn occupies the GPU (so a
  * panel click cannot kill an open stream). `'queue'` (chat tool lanes,
  * in-process agent tools) parks FIFO and may run nested inside its parent
@@ -690,7 +690,7 @@ async function considerRelease(): Promise<void> {
 
 /**
  * Resolves once the GPU window is back on chat and no swap-back is running.
- * Chat, Agent, and Home Agent `/load` wait here via `submitTextRequest`.
+ * Chat and Agent `/load` wait here via `submitTextRequest`.
  * No proceed-anyway bound: abort the signal (cancel the turn) to give up.
  */
 export async function awaitChatWindow(signal?: AbortSignal): Promise<void> {

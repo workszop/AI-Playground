@@ -619,7 +619,7 @@ function llamacppStandardNeedsInstall(component: ExtendedApiServiceInformation):
  * `notInstalled` status is what the Install button is for — previously every
  * row went through `llamacppStandardNeedsInstall`, which short-circuits
  * `false` for non-llama services and left the Install column blank for
- * comfyui/openvino/ai-backend/home-agent on a fresh install.
+ * comfyui/openvino/ai-backend on a fresh install.
  */
 function needsInstall(component: ExtendedApiServiceInformation): boolean {
   if (component.serviceName === 'llamacpp-backend') {

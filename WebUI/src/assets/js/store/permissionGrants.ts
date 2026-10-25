@@ -2,7 +2,6 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { demoAwareStorage } from '../demoAwareStorage'
 import {
-  REMOTE_DOWNLOAD_GRANT,
   VRAM_WARNING_GRANT_PREFIX,
   vramWarningGrantKey,
   type PermissionGrant,
@@ -16,7 +15,7 @@ import {
  * once on `init()`.
  */
 
-export { REMOTE_DOWNLOAD_GRANT, VRAM_WARNING_GRANT_PREFIX, vramWarningGrantKey }
+export { VRAM_WARNING_GRANT_PREFIX, vramWarningGrantKey }
 export type { PermissionGrant, PermissionGrantOrigin }
 
 const LEGACY_PERSIST_KEY = 'permissionGrants'

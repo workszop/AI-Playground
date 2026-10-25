@@ -45,6 +45,22 @@ export const useDialogStore = defineStore('dialog', () => {
   const downloadList = ref<DownloadModelParam[]>([])
   const downloadSuccessFunction = ref<(() => void) | undefined>(undefined)
   const downloadFailFunction = ref<((reason?: unknown) => void) | undefined>(undefined)
+  const downloadRequestId = ref<string | null>(null)
+  const currentDownloadSessionId = ref<number | null>(null)
+
+  type DownloadDialogSession = {
+    id: number
+    requestId: string | null
+    fail?: (reason?: unknown) => void
+    cancel?: () => void | Promise<void>
+    cancelling: boolean
+    failureReported: boolean
+    cleanupPromise?: Promise<void>
+  }
+
+  let nextDownloadSessionId = 0
+  const downloadSessions = new Map<number, DownloadDialogSession>()
+  let downloadCleanupTail = Promise.resolve()
 
   // Preset requirements dialog state
   const presetRequirementsDialogVisible = ref(false)
@@ -89,8 +105,7 @@ export const useDialogStore = defineStore('dialog', () => {
   /**
    * Promise-based confirmation built on the warning dialog UI. Resolves `true`
    * when the user confirms and `false` when they cancel (or the dialog is
-   * dismissed). Used for human-in-the-loop approvals (e.g. the Home Agent
-   * self-configuration tool on the desktop).
+   * dismissed).
    */
   function requestConfirmation(message: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
@@ -111,15 +126,97 @@ export const useDialogStore = defineStore('dialog', () => {
     downList: DownloadModelParam[],
     success?: () => void,
     fail?: (reason?: unknown) => void,
+    options?: { requestId?: string },
   ) {
+    const previousSessionId = currentDownloadSessionId.value
+    if (previousSessionId !== null) {
+      downloadCleanupTail = downloadCleanupTail.then(() => cancelDownloadSession(previousSessionId))
+    }
+    const session: DownloadDialogSession = {
+      id: ++nextDownloadSessionId,
+      requestId: options?.requestId ?? null,
+      fail: undefined,
+      cancelling: false,
+      failureReported: false,
+    }
+    session.fail = (reason?: unknown) => {
+      if (session.failureReported) return
+      session.failureReported = true
+      fail?.(reason)
+    }
+    downloadSessions.set(session.id, session)
+    currentDownloadSessionId.value = session.id
     downloadList.value = downList
     downloadSuccessFunction.value = success
-    downloadFailFunction.value = fail
+    downloadFailFunction.value = session.fail
+    downloadRequestId.value = session.requestId
     downloadDialogVisible.value = true
+    return session.id
   }
 
-  function closeDownloadDialog() {
+  function finishDownloadSession(sessionId: number): void {
+    const session = downloadSessions.get(sessionId)
+    if (!session) return
+    downloadSessions.delete(sessionId)
+    if (currentDownloadSessionId.value !== sessionId) return
+    currentDownloadSessionId.value = null
+    downloadRequestId.value = null
+    downloadSuccessFunction.value = undefined
+    downloadFailFunction.value = undefined
     downloadDialogVisible.value = false
+  }
+
+  function closeDownloadDialog(sessionId?: number) {
+    const currentSessionId = currentDownloadSessionId.value
+    if (sessionId !== undefined && sessionId !== currentSessionId) return
+    if (currentSessionId !== null) finishDownloadSession(currentSessionId)
+    else downloadDialogVisible.value = false
+  }
+
+  function isDownloadSessionCurrent(sessionId: number): boolean {
+    return currentDownloadSessionId.value === sessionId && downloadSessions.has(sessionId)
+  }
+
+  function currentDownloadSession(): number | null {
+    return currentDownloadSessionId.value
+  }
+
+  function registerDownloadCancel(sessionId: number, cancel?: () => void | Promise<void>): void {
+    const session = downloadSessions.get(sessionId)
+    if (!session || session.cancelling || !isDownloadSessionCurrent(sessionId)) return
+    session.cancel = cancel
+  }
+
+  async function cancelDownloadSession(sessionId: number, reason?: unknown): Promise<void> {
+    const session = downloadSessions.get(sessionId)
+    if (!session) return
+    if (session.cleanupPromise) return session.cleanupPromise
+    session.cancelling = true
+    session.cleanupPromise = (async () => {
+      const cancel = session.cancel
+      session.cancel = undefined
+      try {
+        await cancel?.()
+      } catch {
+        // The owning download still needs to settle even if its stop request fails.
+      }
+      session.fail?.(reason ?? new Error('Download cancelled by user'))
+      finishDownloadSession(sessionId)
+    })()
+    return session.cleanupPromise
+  }
+
+  function waitForDownloadCleanup(): Promise<void> {
+    return downloadCleanupTail
+  }
+
+  function cancelDownloadDialog(requestId: string): void {
+    for (const session of downloadSessions.values()) {
+      if (session.requestId === requestId) {
+        void cancelDownloadSession(session.id)
+        return
+      }
+    }
   }
 
   function showPresetRequirementsDialog(data: PresetRequirementsData, confirmFunction: () => void) {
@@ -320,6 +417,13 @@ export const useDialogStore = defineStore('dialog', () => {
     downloadFailFunction,
     showDownloadDialog,
     closeDownloadDialog,
+    finishDownloadSession,
+    isDownloadSessionCurrent,
+    currentDownloadSession,
+    waitForDownloadCleanup,
+    registerDownloadCancel,
+    cancelDownloadSession,
+    cancelDownloadDialog,
 
     // Preset requirements dialog
     presetRequirementsDialogVisible,

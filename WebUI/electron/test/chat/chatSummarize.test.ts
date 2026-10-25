@@ -51,13 +51,13 @@ describe('chat summarize admit (step 15)', () => {
     ).resolves.toBe('hello world extra words')
     expect(submitTextRequest).toHaveBeenCalledWith({
       runId: expect.stringMatching(/^summarize-/),
-      conversationKey: 'home-agent-summarize',
+      conversationKey: 'chat-summarize',
       needsGpu: true,
     })
     expect(ensureChatBackendReady).toHaveBeenCalledWith(localModel.readiness, {
       skipGpuAdmission: true,
       remember: false,
-      conversationKey: 'home-agent-summarize',
+      conversationKey: 'chat-summarize',
     })
     expect(finishTextRequest).toHaveBeenCalledTimes(1)
     expect(generateText).toHaveBeenCalledTimes(1)

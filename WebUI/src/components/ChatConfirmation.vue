@@ -10,9 +10,6 @@
         <span class="truncate">{{ pending.title }}</span>
       </div>
       <MarkdownRenderer :content="pending.summaryMarkdown" />
-      <p v-if="pending.origin === 'remote'" class="text-xs text-muted-foreground">
-        {{ remoteHint }}
-      </p>
       <div class="flex items-center gap-3">
         <button
           class="rounded bg-primary px-4 py-1 text-sm text-foreground transition-opacity hover:opacity-90"
@@ -52,12 +49,6 @@ const confirmations = useConfirmations()
 const i18nState = useI18N().state
 
 const pending = computed(() => confirmations.forConversation(props.conversationKey))
-
-const remoteHint = computed(() => {
-  const channel = pending.value?.channelLabel
-  const where = channel ? channel.charAt(0).toUpperCase() + channel.slice(1) : 'the channel'
-  return `Waiting for your reply in ${where} — you can also confirm here.`
-})
 
 function decide(answer: boolean) {
   if (pending.value) confirmations.resolve(pending.value.id, answer)

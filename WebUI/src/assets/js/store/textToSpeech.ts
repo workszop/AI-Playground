@@ -82,16 +82,8 @@ export const useTextToSpeech = defineStore('textToSpeech', () => {
   const setupWizard = useSetupWizard()
   const productMode = useProductMode()
 
-  /**
-   * App-wide fallback speech endpoint. Shared by the desktop auto-play path
-   * and the Home Agent voice-reply pipeline so TTS works even without OVMS.
-   */
-  /**
-   * App-wide fallback speech endpoint. Shared by the desktop auto-play path
-   * and the Home Agent voice-reply pipeline so TTS works even without OVMS.
-   * The API key inside is a secret the user entered once — preferences.json
-   * is a plain file the user can back up, same as the localStorage key was.
-   */
+  /** App-wide fallback speech endpoint for desktop playback and chat tools. */
+  /** The API key is user configuration stored in preferences.json. */
   const fallback = ref<TtsFallbackConfig>({
     enabled: false,
     baseUrl: '',
@@ -131,9 +123,7 @@ export const useTextToSpeech = defineStore('textToSpeech', () => {
   /**
    * Whether desktop reply playback is usable: either Kokoro (OVMS) or a
    * configured external endpoint. Gates only the speech adapter's `speak()`
-   * (the Speak button and auto-speak). Home Agent voice replies do NOT use
-   * this — they synthesize through the adapter's unattended clip path,
-   * which includes Qwen3.
+   * (the Speak button and auto-speak).
    *
    * Deliberately excludes the Qwen3 engine: reply playback synthesizes
    * through the OVMS/external endpoints only — Qwen3's model load is too

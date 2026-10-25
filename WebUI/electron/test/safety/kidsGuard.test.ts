@@ -974,6 +974,239 @@ describe('guardUiMessageStream', () => {
     })
   })
 
+  it('judges a tool output error before showing it and preserves safe errors', async () => {
+    const check = vi.fn(async () => ({ level: 'safe' as const }))
+    const errorText = 'The web tool failed to load the page.'
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'tool-output-error', toolCallId: 'c1', errorText },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(check).toHaveBeenCalledWith(errorText)
+    expect(out).toContainEqual({ type: 'tool-output-error', toolCallId: 'c1', errorText })
+  })
+
+  it('redacts an unsafe tool output error and stops the turn', async () => {
+    const check = vi.fn(async () => ({ level: 'unsafe' as const }))
+    const onBlocked = vi.fn()
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'tool-input-available', toolCallId: 'c1', toolName: 'web', input: {} },
+          { type: 'tool-output-error', toolCallId: 'c1', errorText: 'Nie pokazuj tego błędu.' },
+          { type: 'finish' },
+        ]),
+        check,
+        onBlocked,
+      ),
+    )
+    expect(check).toHaveBeenCalledWith('Nie pokazuj tego błędu.')
+    expect(out.map((c) => c.type)).toEqual([
+      'start',
+      'tool-input-available',
+      'tool-output-error',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish',
+    ])
+    expect(out[2]).toEqual({
+      type: 'tool-output-error',
+      toolCallId: 'c1',
+      errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
+    })
+    expect(onBlocked).toHaveBeenCalledTimes(1)
+    expect(
+      out.some((chunk) => 'errorText' in chunk && chunk.errorText === 'Nie pokazuj tego błędu.'),
+    ).toBe(false)
+  })
+
+  it('judges a tool input error text as well as its input and preserves safe errors', async () => {
+    const check = vi.fn(async (_text: string) => ({ level: 'safe' as const }))
+    const errorText = 'The arguments were invalid.'
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          {
+            type: 'tool-input-error',
+            toolCallId: 'c1',
+            toolName: 'web',
+            input: { query: 'smoki' },
+            errorText,
+          },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(check.mock.calls.map(([text]) => text)).toEqual(['smoki', errorText])
+    expect(out).toContainEqual({
+      type: 'tool-input-error',
+      toolCallId: 'c1',
+      toolName: 'web',
+      input: { query: 'smoki' },
+      errorText,
+    })
+  })
+
+  it('redacts an unsafe tool input error', async () => {
+    const check = vi
+      .fn()
+      .mockResolvedValueOnce({ level: 'safe' as const })
+      .mockResolvedValueOnce({ level: 'unsafe' as const })
+    const onBlocked = vi.fn()
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          {
+            type: 'tool-input-error',
+            toolCallId: 'c1',
+            toolName: 'web',
+            input: { query: 'smoki' },
+            errorText: 'Nie pokazuj tego błędu.',
+          },
+          { type: 'finish' },
+        ]),
+        check,
+        onBlocked,
+      ),
+    )
+    expect(out.map((c) => c.type)).toEqual([
+      'start',
+      'tool-input-error',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish',
+    ])
+    expect(out[1]).toEqual({
+      type: 'tool-input-error',
+      toolCallId: 'c1',
+      toolName: 'web',
+      input: { query: 'smoki' },
+      errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
+    })
+    expect(onBlocked).toHaveBeenCalledTimes(1)
+    expect(
+      out.some((chunk) => 'errorText' in chunk && chunk.errorText === 'Nie pokazuj tego błędu.'),
+    ).toBe(false)
+  })
+
+  it('judges general stream errors and preserves safe error text', async () => {
+    const check = vi.fn(async () => ({ level: 'safe' as const }))
+    const errorText = 'The backend closed the connection.'
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'error', errorText },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(check).toHaveBeenCalledWith(errorText)
+    expect(out).toContainEqual({ type: 'error', errorText })
+  })
+
+  it('redacts an unsafe general stream error', async () => {
+    const check = vi.fn(async () => ({ level: 'unsafe' as const }))
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'error', errorText: 'Nie pokazuj tego błędu.' },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(check).toHaveBeenCalledWith('Nie pokazuj tego błędu.')
+    expect(out.map((c) => c.type)).toEqual([
+      'start',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish',
+    ])
+    expect(
+      out.some((chunk) => 'errorText' in chunk && chunk.errorText === 'Nie pokazuj tego błędu.'),
+    ).toBe(false)
+  })
+
+  it('does not expose an output error when its safety check is cancelled', async () => {
+    const check = vi.fn().mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'tool-input-available', toolCallId: 'c1', toolName: 'web', input: {} },
+          { type: 'tool-output-error', toolCallId: 'c1', errorText: 'Nie pokazuj tego błędu.' },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(out).toEqual([
+      { type: 'start', messageId: 'm1' },
+      { type: 'tool-input-available', toolCallId: 'c1', toolName: 'web', input: {} },
+      {
+        type: 'tool-output-error',
+        toolCallId: 'c1',
+        errorText: KIDS_TOOL_OUTPUT_STOPPED_MESSAGE,
+      },
+      { type: 'finish' },
+    ])
+    expect(
+      out.some((chunk) => 'errorText' in chunk && chunk.errorText === 'Nie pokazuj tego błędu.'),
+    ).toBe(false)
+  })
+
+  it('does not expose an input error when its safety check is cancelled', async () => {
+    const check = vi
+      .fn()
+      .mockResolvedValueOnce({ level: 'safe' as const })
+      .mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          {
+            type: 'tool-input-error',
+            toolCallId: 'c1',
+            toolName: 'web',
+            input: { query: 'smoki' },
+            errorText: 'Nie pokazuj tego błędu.',
+          },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(out).toEqual([
+      { type: 'start', messageId: 'm1' },
+      {
+        type: 'tool-input-error',
+        toolCallId: 'c1',
+        toolName: 'web',
+        input: { query: 'smoki' },
+        errorText: KIDS_TOOL_OUTPUT_STOPPED_MESSAGE,
+      },
+      { type: 'finish' },
+    ])
+    expect(
+      out.some((chunk) => 'errorText' in chunk && chunk.errorText === 'Nie pokazuj tego błędu.'),
+    ).toBe(false)
+  })
+
   it('judges a tool input before showing the call', async () => {
     const check = vi.fn(async () => ({ level: 'safe' as const }))
     const out = await collect(

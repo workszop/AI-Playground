@@ -2,14 +2,8 @@
   <div
     class="z-10 text-foreground rounded-xl bg-background/70 backdrop-blur-sm border border-border shadow-lg"
   >
-    <HomeAgentSetupPage
-      v-if="wizard.wizardPage === 'homeAgentSetup'"
-      @back="wizard.wizardPage = 'main'"
-      @done="wizard.finishHomeAgentSetup()"
-    />
-
     <CloudModeSetupPage
-      v-else-if="wizard.wizardPage === 'cloudModeSetup' && cloudMode.isFeatureEnabled"
+      v-if="wizard.wizardPage === 'cloudModeSetup' && cloudMode.isFeatureEnabled"
       @back="wizard.wizardPage = 'main'"
       @done="wizard.finishCloudModeSetup()"
     />
@@ -192,15 +186,8 @@
             </h2>
 
             <div class="flex flex-col gap-1.5">
-              <!-- AI Playground: the core service plus the features layered on it.
-                   Core cannot be turned off, so the group toggle drives only the
-                   optional members (Home Agent, Hybrid Cloud). -->
-              <SetupWizardGroup
-                title="AI Playground"
-                :info-url="AI_PLAYGROUND_INFO_URL"
-                :toggle="aiPlaygroundGroupToggle"
-                @toggle="setAiPlaygroundGroup"
-              >
+              <!-- AI Playground: the core service plus the frontend-only cloud mode. -->
+              <SetupWizardGroup title="AI Playground" :info-url="AI_PLAYGROUND_INFO_URL">
                 <!-- Core Services owns the speech sidecars: they are runtimes the
                      core experience needs, not products of their own, so a first
                      run reads as one core install. The disclosure keeps the opt-out
@@ -251,27 +238,9 @@
                   </CollapsibleContent>
                 </Collapsible>
 
-                <SetupWizardRow
-                  v-for="row in aiPlaygroundOptionalRows"
-                  :key="row.serviceName"
-                  :row="backendRowView(row)"
-                  compact
-                  @toggle="(v) => wizard.toggleBackend(row.serviceName, v)"
-                  @repair="wizard.repairBackend(row.serviceName)"
-                  @show-error="wizard.showErrorModal(row.serviceName)"
-                >
-                  <template #options>
-                    <BackendOptions :backend="row.serviceName" />
-                  </template>
-                </SetupWizardRow>
-
-                <!-- Hybrid Cloud: frontend-only component (remote OpenAI-compatible
-                     provider). Not a real backend service, but rendered identically
-                     to a regular backend row via the shared component. -->
+                <!-- Hybrid Cloud is frontend-only, but rendered like a backend row. -->
                 <SetupWizardRow :row="cloudRow" compact @toggle="(v) => cloudMode.toggleFeature(v)">
                   <template #options>
-                    <!-- Identical to the Home Agent gear menu (see BackendOptions):
-                         a single "Setup" item that opens the setup page. -->
                     <SettingsMenu
                       v-model:open="cloudMenuOpen"
                       :label="HYBRID_CLOUD_NAME"
@@ -457,7 +426,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ChevronDownIcon } from '@heroicons/vue/24/outline'
 import BackendOptions from '@/components/BackendOptions.vue'
 import SetupWizardRow, { type SetupWizardRowView } from '@/components/SetupWizardRow.vue'
-import SetupWizardGroup, { type SetupWizardGroupToggle } from '@/components/SetupWizardGroup.vue'
+import SetupWizardGroup from '@/components/SetupWizardGroup.vue'
 import SettingsMenu from '@/components/SettingsMenu.vue'
 import {
   DropdownMenu,
@@ -468,7 +437,6 @@ import {
 import PhisonAidaptivOptions from '@/components/PhisonAidaptivOptions.vue'
 import ErrorDetailsModal from '@/components/ErrorDetailsModal.vue'
 import LanguageSelector from '@/components/LanguageSelector.vue'
-import HomeAgentSetupPage from '@/components/HomeAgentSetupPage.vue'
 import CloudModeSetupPage from '@/components/CloudModeSetupPage.vue'
 
 const wizard = useSetupWizard()
@@ -519,26 +487,18 @@ const resolvedModeOptions = computed(() => {
 // The flat list of every backend had grown long enough that related pieces read
 // as unrelated peers. The AI Playground group fixes that; anything not named here
 // keeps its own full-width row, in the order the store returns it.
-const AI_PLAYGROUND_GROUP: BackendServiceName[] = ['ai-backend', 'home-agent-backend']
 const CORE_DEPENDENTS: BackendServiceName[] = [...CORE_DEPENDENT_BACKENDS]
 
-const aiPlaygroundRows = computed(() =>
-  wizard.backendRows.filter((r) => AI_PLAYGROUND_GROUP.includes(r.serviceName)),
-)
 /** The core service itself — owner of the nested speech sidecars below. */
 const coreRow = computed(
   () => wizard.backendRows.find((r) => r.serviceName === 'ai-backend') ?? null,
-)
-/** Optional members of the group that are NOT nested under Core Services. */
-const aiPlaygroundOptionalRows = computed(() =>
-  aiPlaygroundRows.value.filter((r) => r.serviceName !== 'ai-backend'),
 )
 const coreDependentRows = computed(() =>
   wizard.backendRows.filter((r) => CORE_DEPENDENTS.includes(r.serviceName)),
 )
 const ungroupedRows = computed(() =>
   wizard.backendRows.filter(
-    (r) => !AI_PLAYGROUND_GROUP.includes(r.serviceName) && !CORE_DEPENDENTS.includes(r.serviceName),
+    (r) => r.serviceName !== 'ai-backend' && !CORE_DEPENDENTS.includes(r.serviceName),
   ),
 )
 
@@ -564,56 +524,6 @@ watch(
   },
   { immediate: true },
 )
-
-/**
- * A group's master toggle reflects and drives only the members that can actually
- * be toggled: a required backend (Core Services) is never touched, so the switch
- * does not snap back to "on" the moment the user turns the group off. `null` when
- * nothing in the group is toggleable — the group then renders without a switch.
- */
-function groupToggle(
-  rows: BackendRowViewModel[],
-  extra?: { enabled: boolean },
-): SetupWizardGroupToggle | null {
-  const toggleable = rows.filter((r) => !r.toggleDisabled)
-  if (toggleable.length === 0 && !extra) return null
-  const enabled = toggleable.some((r) => r.enabled) || extra?.enabled === true
-  const disabled = rows.some((r) => r.isInstalling)
-  return {
-    enabled,
-    disabled,
-    tooltip: disabled
-      ? languages.SETUP_WIZARD_INSTALLATION_IN_PROGRESS || 'Installation in progress'
-      : enabled
-        ? languages.SETUP_WIZARD_GROUP_TOGGLE_OFF ||
-          'Toggle off to disable every optional component in this group'
-        : languages.SETUP_WIZARD_GROUP_TOGGLE_ON ||
-          'Toggle on to enable every optional component in this group',
-  }
-}
-
-const aiPlaygroundGroupToggle = computed(() =>
-  groupToggle(aiPlaygroundRows.value, { enabled: cloudMode.isFeatureEnabled }),
-)
-async function setGroup(rows: BackendRowViewModel[], value: boolean) {
-  for (const row of rows) {
-    if (row.toggleDisabled) continue
-    await wizard.toggleBackend(row.serviceName, value)
-  }
-}
-
-async function setAiPlaygroundGroup(value: boolean) {
-  // Only the group's own optional members: the speech sidecars nested under Core
-  // Services are core dependents, so a master switch meant for Home Agent must
-  // not silently skip the app's audio runtimes. Their opt-out is their own row.
-  await setGroup(aiPlaygroundRows.value, value)
-  // Hybrid Cloud is opt-in and defaults to off: it needs no install, and switching
-  // it on without a configured provider gains the user nothing while making the
-  // row look ready. So the group's master switch never enables it — only its own
-  // row toggle does. Turning the group OFF still disables it, which is what
-  // "disable everything in this group" should mean.
-  if (!value) await cloudMode.toggleFeature(false)
-}
 
 // Per-row ⓘ text: which engine the row installs, and what the alternative is.
 // The speech rows also say whether OpenVINO can serve the same feature in the

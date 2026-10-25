@@ -35,9 +35,8 @@ import {
 } from '@/lib/ovmsMtp'
 import { usePresets, type ChatPreset } from './presets'
 import { useDeveloperSettings } from './developerSettings'
-import { useHomeAgent } from './homeAgent'
 import { useCloudMode, CLOUD_DEFAULT_MODEL } from './cloudMode'
-import { useConversations, HOME_AGENT_CHAT_PRESET_NAME } from './conversations'
+import { useConversations } from './conversations'
 import * as toast from '@/assets/js/toast.ts'
 import { useActivities } from './activities'
 import { useI18N } from './i18n'
@@ -150,7 +149,6 @@ export const useTextInference = defineStore(
     const models = useModels()
     const presetsStore = usePresets()
     const developerSettings = useDeveloperSettings()
-    const homeAgent = useHomeAgent()
     const cloudMode = useCloudMode()
     const conversations = useConversations()
     const activities = useActivities()
@@ -561,10 +559,8 @@ export const useTextInference = defineStore(
     const aipgToolsEnabled = ref(true)
     // "Speak replies": read a reply aloud when the user's input was speech. Edited on
     // the Text To Speech tool row (SettingsBuiltinTools) and stored per chat preset
-    // like the other tool settings, so it applies to whichever preset is active —
-    // the assistant auto-plays in the app, the Home Agent answers a voice message
-    // with a voice message. Initialized per preset on load; see
-    // `defaultSpeakReplies` / `speakRepliesAllowed`.
+    // like the other tool settings, so it applies to whichever preset is active.
+    // Initialized per preset on load.
     const speakReplies = ref(false)
     const mcpToolsEnabled = ref(true)
     // Route the heavy media tools (comfyUI + comfyUiImageEdit) through the
@@ -615,31 +611,19 @@ export const useTextInference = defineStore(
     }
 
     /**
-     * Default for "Speak replies": on for the Home Agent, where a voice message
-     * asks for a voice answer, and off elsewhere so the desktop app never starts
-     * talking without the user having asked for it.
-     */
-    function defaultSpeakReplies(presetName?: string): boolean {
-      return presetName === HOME_AGENT_CHAT_PRESET_NAME
-    }
-
-    /**
      * Whether replies may be spoken for a preset: its "Speak replies" toggle and
      * tools must be on, and the Text To Speech tool (which supplies the voice) must
      * be enabled — that is what the toggle rides on in the UI.
      *
      * Pass `presetName` to read the *stored* value for a preset instead of the live
-     * refs. The Home Agent needs that: it answers on its own preset, while the live
-     * refs may already hold the desktop user's preset again. A preset with nothing
-     * saved yet falls back to that preset's default.
+     * refs. A preset with nothing saved yet falls back to the desktop default.
      */
     function speakRepliesAllowed(presetName?: string): boolean {
       if (!isBuiltinToolEnabled('synthesizeTextToSpeech')) return false
       if (!presetName) return aipgToolsEnabled.value && speakReplies.value
       const saved = findSettingsForPreset(presetName)
       const toolsOn = (saved?.aipgToolsEnabled as boolean | undefined) ?? aipgToolsEnabled.value
-      const speakOn =
-        (saved?.speakReplies as boolean | undefined) ?? defaultSpeakReplies(presetName)
+      const speakOn = (saved?.speakReplies as boolean | undefined) ?? false
       return toolsOn && speakOn
     }
 
@@ -1004,10 +988,7 @@ export const useTextInference = defineStore(
       syncRagSelectionForActiveKey()
     }
 
-    // Raw URL of the selected local inference backend. When Home Agent is
-    // active, `currentBackendUrl` is that agent's loopback proxy instead
-    // (X-AIPG-Auth / X-Upstream-Url); callers that cannot attach those headers
-    // dial the backend through this.
+    // Raw URL of the selected local inference backend.
     const localBackendUrl = computed(
       () =>
         backendServices.info.find((item) => item.serviceName === backendToService[backend.value])
@@ -1018,16 +999,8 @@ export const useTextInference = defineStore(
       if (backend.value === 'cloud') {
         return cloudMode.activeProviderBaseUrl
       }
-      if (homeAgent.isHomeAgentActive && homeAgent.homeAgentBaseUrl) {
-        return homeAgent.homeAgentBaseUrl
-      }
       return localBackendUrl.value
     })
-
-    // When Home Agent is active, the real inference backend URL to proxy through
-    const homeAgentUpstreamUrl = computed(() =>
-      homeAgent.isHomeAgentActive ? localBackendUrl.value : undefined,
-    )
 
     async function getDownloadParamsForCurrentModelIfRequired(
       type: 'llm' | 'embedding',
@@ -1068,8 +1041,7 @@ export const useTextInference = defineStore(
       // an embedding-only download (its "active model" lookup is incidental here).
       // A text turn runs without it (llama.cpp only passes --mmproj when the file
       // is beside the model), so asking for it would be a gigabyte the turn does
-      // not use — and on a remote Home Agent turn, a download question nobody
-      // expected.
+      // not use.
       if (type === 'llm' && options.needsVision && modelMetaData?.mmproj) {
         checkList.push({
           repo_id: modelMetaData.mmproj,
@@ -1159,9 +1131,8 @@ export const useTextInference = defineStore(
       const existing = ragList.value.find((item) => item.hash === langchainDocument.hash)
       if (existing) {
         // Same content (by hash) is already indexed. Don't duplicate, but honor
-        // an explicit request to enable it (e.g. a Home Agent document upload
-        // stub arrives with isChecked: true) so re-sending a file the user
-        // already has makes it usable instead of silently no-op'ing.
+        // an explicit request to enable it so re-sending a file the user already
+        // has makes it usable instead of silently no-op'ing.
         if (langchainDocument.isChecked) {
           existing.isChecked = true
           persistActiveRagSelection()
@@ -1178,9 +1149,7 @@ export const useTextInference = defineStore(
       // Content is derived here from splitDB + the boundary-only mergedGroups — this
       // WarmupRequest payload is transient (never persisted), so carrying full text
       // in it is fine.
-      // Prefer the direct llama.cpp upstream URL when Home Agent is active —
-      // currentBackendUrl points at the Home Agent proxy, which does not own the KV cache.
-      const warmupBackendUrl = homeAgentUpstreamUrl.value ?? currentBackendUrl.value
+      const warmupBackendUrl = currentBackendUrl.value
       if (
         isPhisonKmRag.value &&
         langchainDocument.mergedGroups?.length &&
@@ -1374,16 +1343,6 @@ export const useTextInference = defineStore(
           throw error
         }
       }
-
-      // If Home Agent is active, also ensure it is running
-      if (homeAgent.isHomeAgentActive) {
-        const homeAgentInfo = backendServices.info.find(
-          (s) => s.serviceName === 'home-agent-backend',
-        )
-        if (homeAgentInfo && homeAgentInfo.isSetUp && homeAgentInfo.status !== 'running') {
-          await backendServices.startService('home-agent-backend')
-        }
-      }
     }
 
     async function checkModelAvailability(options: { needsVision?: boolean } = {}) {
@@ -1404,8 +1363,7 @@ export const useTextInference = defineStore(
       )
 
       if (uniqueDownloads.length === 0) return
-      // The permissions layer owns the prompt: the download modal, or the
-      // channel when a remote Home Agent turn is active.
+      // The permissions layer owns the desktop download prompt.
       await requestDownload(uniqueDownloads)
     }
 
@@ -1543,12 +1501,7 @@ export const useTextInference = defineStore(
       // Helper to select the best available backend from preset's allowed list.
       //
       // We intentionally do NOT carry over `backend.value` when the new preset
-      // has no persisted choice: that branch caused per-preset settings to
-      // silently inherit whichever preset was active just before. Concretely,
-      // editing the Home Agent backend would change the Basic Chat backend on
-      // the next switch, because Basic Chat had no saved entry yet and
-      // "if current backend is allowed, keep it" pulled in the Home Agent
-      // value from the global ref. Deterministic per-preset defaults make the
+      // has no persisted choice. Deterministic per-preset defaults make the
       // user's explicit choices the only thing that crosses presets.
       function selectBestBackend(preset: ChatPreset) {
         if (!preset.backends || preset.backends.length === 0) return
@@ -1729,8 +1682,7 @@ export const useTextInference = defineStore(
         legacyToolEnablement.value,
       )
 
-      speakReplies.value =
-        (savedSettings.speakReplies as boolean | undefined) ?? defaultSpeakReplies(preset.name)
+      speakReplies.value = (savedSettings.speakReplies as boolean | undefined) ?? false
 
       // Per-workflow enablement for preset-backed tools (defaults to all-enabled
       // when unsaved, matching isWorkflowPresetEnabled's default).
@@ -1842,22 +1794,10 @@ export const useTextInference = defineStore(
     // Per-thread preset stamping & reactivation
     // ========================================================================
 
-    /**
-     * Resolve the chat preset (+ variant) that should drive inference for a
-     * given conversation. Home Agent threads are always pinned to the bundled
-     * Home Agent preset; main threads mirror the live sidebar selection.
-     */
+    /** Resolve the chat preset (+ variant) that should drive a conversation. */
     function resolvePresetForConversation(
-      conversationKey: string,
+      _conversationKey: string,
     ): { presetName: string; variant: string | null } | null {
-      const kind = conversations.getThreadKind(conversationKey)
-      if (kind === 'homeAgent') {
-        const meta = conversations.getThreadMeta(conversationKey)
-        return {
-          presetName: HOME_AGENT_CHAT_PRESET_NAME,
-          variant: meta?.variant ?? null,
-        }
-      }
       const presetName = presetsStore.activePresetName
       if (!presetName) return null
       return {
@@ -1900,18 +1840,14 @@ export const useTextInference = defineStore(
      * Stamp `conversationThreadMeta[conversationKey]` so the thread keeps a
      * record of which preset (+ variant) drove its most recent inference.
      * Called from generate/regenerate before running inference.
-     *
-     * For Home Agent threads this also enforces routing to the bundled preset
-     * regardless of what the desktop sidebar happened to show.
      */
     function stampMetaForConversation(conversationKey: string): void {
       const resolved = resolvePresetForConversation(conversationKey)
       if (!resolved) return
-      const existingKind = conversations.getThreadMeta(conversationKey)?.kind
       conversations.setThreadMeta(conversationKey, {
         presetName: resolved.presetName,
         variant: resolved.variant,
-        kind: existingKind ?? 'main',
+        kind: 'main',
       })
     }
 
@@ -2043,12 +1979,6 @@ export const useTextInference = defineStore(
       (newKey) => {
         if (!newKey) return
         const meta = conversations.getThreadMeta(newKey)
-        // Home Agent threads are always pinned to the bundled Home Agent preset,
-        // even before they've been stamped, so opening one switches the picker.
-        if (conversations.getThreadKind(newKey) === 'homeAgent') {
-          applyPresetToGlobals(HOME_AGENT_CHAT_PRESET_NAME, meta?.variant ?? null)
-          return
-        }
         if (!meta?.presetName) return
         const exists = presetsStore.presets.some((p) => p.name === meta.presetName)
         if (!exists) {
@@ -2068,9 +1998,8 @@ export const useTextInference = defineStore(
     // Mirror the active conversation's RAG selection into the shared library's
     // live `isChecked` flags whenever the active conversation changes. A new /
     // empty conversation has no stored selection, so it starts with no enabled
-    // RAG documents; switching back to a thread restores its selection. Home
-    // Agent turns set `activeKey` to the remote thread before generating, so
-    // this works uniformly for remote threads too. `immediate: true` restores
+    // RAG documents; switching back to a thread restores its selection.
+    // `immediate: true` restores
     // the resumed thread's selection on startup.
     watch(() => conversations.activeKey, syncRagSelectionForActiveKey, {
       flush: 'post',
@@ -2090,7 +2019,7 @@ export const useTextInference = defineStore(
     //   1. First launch: activePresetName is null.
     //   2. Subsequent launches: the persisted activePresetName can point at a
     //      non-chat preset (e.g. an image preset left active after the last
-    //      image-gen session, or a picker-excluded one like Home Agent).
+    //      image-gen session, or a picker-excluded one).
     // In both cases, reconcile it to the last-used chat preset (falling back to
     // the highest-priority one). Without this, Chat Settings' PresetSelector —
     // which filters to chat presets — can't find the active preset and renders
@@ -2254,9 +2183,6 @@ export const useTextInference = defineStore(
 
       // RAG state
       willUseRag,
-
-      // Home Agent
-      homeAgentUpstreamUrl,
 
       // In-flight inference stream tracking (used by image tools to avoid
       // resetting an open chat-backend socket when freeing the GPU)

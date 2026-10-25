@@ -256,9 +256,8 @@ const activeChatPreset = computed(() => {
   return null
 })
 
-// Remember the most recent chat preset so the indicator stays stable while a
-// tool call or Home Agent turn temporarily switches the active preset to a
-// ComfyUI one during agentic tool use.
+// Remember the most recent chat preset so the indicator stays stable while an
+// agentic tool call temporarily switches the active preset to a ComfyUI one.
 const stableChatPreset = ref<ChatPreset | null>(null)
 watch(
   activeChatPreset,

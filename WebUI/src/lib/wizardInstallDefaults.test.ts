@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   CORE_DEPENDENT_BACKENDS,
-  OPT_IN_BACKENDS,
   isCoreDependentBackend,
   selectDefaultInstalls,
   type SeedCandidate,
@@ -11,7 +10,6 @@ import {
 function freshMachine(): SeedCandidate[] {
   return [
     { serviceName: 'ai-backend', isRequired: true, isSetUp: false, ...offered() },
-    { serviceName: 'home-agent-backend', isRequired: false, isSetUp: false, ...offered() },
     { serviceName: 'qwen3-tts-backend', isRequired: false, isSetUp: false, ...offered() },
     { serviceName: 'whisper-backend', isRequired: false, isSetUp: false, ...offered() },
     { serviceName: 'llamacpp-backend', isRequired: false, isSetUp: false, ...offered() },
@@ -45,25 +43,6 @@ describe('selectDefaultInstalls', () => {
 
   it('omits required components — they install regardless and their row is locked', () => {
     expect(selectDefaultInstalls(freshMachine())).not.toContain('ai-backend')
-  })
-
-  it('leaves Home Agent off on a machine that does not have it', () => {
-    expect(selectDefaultInstalls(freshMachine())).not.toContain('home-agent-backend')
-  })
-
-  it('pre-selects Home Agent once it is installed, so reopening the wizard keeps it', () => {
-    const candidates = withCandidate(freshMachine(), 'home-agent-backend', { isSetUp: true })
-
-    expect(selectDefaultInstalls(candidates)).toContain('home-agent-backend')
-  })
-
-  it('respects an installed Home Agent the user switched off', () => {
-    const candidates = withCandidate(freshMachine(), 'home-agent-backend', {
-      isSetUp: true,
-      userDisabled: true,
-    })
-
-    expect(selectDefaultInstalls(candidates)).not.toContain('home-agent-backend')
   })
 
   it('skips OpenVINO when the pending product mode cannot offer it (NVIDIA)', () => {
@@ -111,9 +90,5 @@ describe('component classification', () => {
   it('treats only the two speech sidecars as core dependents', () => {
     expect([...CORE_DEPENDENT_BACKENDS]).toEqual(['qwen3-tts-backend', 'whisper-backend'])
     expect(isCoreDependentBackend('comfyui-backend')).toBe(false)
-  })
-
-  it('treats only Home Agent as opt-in', () => {
-    expect([...OPT_IN_BACKENDS]).toEqual(['home-agent-backend'])
   })
 })

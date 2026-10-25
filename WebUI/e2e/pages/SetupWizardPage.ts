@@ -99,12 +99,7 @@ export class SetupWizardPage {
     }
   }
 
-  /**
-   * Turn a backend off if its row is present and enabled. Used to deactivate Home
-   * Agent — leaving it on makes the wizard divert to the Home Agent setup page
-   * after install instead of reaching the running app. No-op if the row is absent
-   * (e.g. the feature is off) or the toggle is disabled.
-   */
+  /** Turn a backend off if its row is present and enabled. */
   async disableBackend(displayName: BackendDisplayName): Promise<void> {
     await this.revealRow(displayName)
     const toggle = this.toggle(displayName)

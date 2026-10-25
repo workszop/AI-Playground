@@ -6,7 +6,6 @@ import { bindRendererBusyReset, resolveClosePolicy } from '../../kernel/windowLi
 // real close. Every combination that matters:
 
 const idle = {
-  homeAgentRunning: false,
   rendererBusy: false,
   agentTurnActive: false,
   chatTurnActive: false,
@@ -16,10 +15,6 @@ const idle = {
 describe('resolveClosePolicy', () => {
   it('closes when nothing is in flight', () => {
     expect(resolveClosePolicy(idle)).toBe('close')
-  })
-
-  it('hides while the Home Agent serves its channels', () => {
-    expect(resolveClosePolicy({ ...idle, homeAgentRunning: true })).toBe('hide')
   })
 
   it('hides while the renderer reports tracked work', () => {
@@ -41,7 +36,6 @@ describe('resolveClosePolicy', () => {
   it('hides when several are in flight at once', () => {
     expect(
       resolveClosePolicy({
-        homeAgentRunning: true,
         rendererBusy: true,
         agentTurnActive: true,
         chatTurnActive: true,

@@ -55,6 +55,15 @@ describe('buildPresetCatalog', () => {
     expect(catalog.comfy.has('Test Image')).toBe(true)
   })
 
+  it('does not expose the removed Home Agent chat preset', () => {
+    const catalog = buildPresetCatalog([
+      fileFor({ type: 'chat', name: 'Home Agent', backends: ['llamaCPP'] }),
+      fileFor(validChat),
+    ])
+    expect(catalog.chat.has('Home Agent')).toBe(false)
+    expect(catalog.chat.has('Test Chat')).toBe(true)
+  })
+
   it('injects dev presets only behind the flag', () => {
     const without = buildPresetCatalog([fileFor(validComfy)])
     const withDev = buildPresetCatalog([fileFor(validComfy)], { includeDevPresets: true })

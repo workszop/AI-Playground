@@ -13,9 +13,7 @@ import { usePresetSwitching } from './presetSwitching'
 import { useSpeechToText } from './speechToText'
 import { useTextToSpeech } from './textToSpeech'
 import { useDemoMode } from './demoMode'
-import { useHomeAgent } from './homeAgent'
 import { useCloudMode } from './cloudMode'
-import { CHANNELS } from './channels/channelRegistry'
 import { mapServiceNameToDisplayName, mapStatusToColor, mapToDisplayStatus } from '@/lib/utils'
 import { isOnDemandBackend } from '@/lib/onDemandBackends'
 import { selectDefaultInstalls, type SeedCandidate } from '@/lib/wizardInstallDefaults'
@@ -94,7 +92,6 @@ const knownSteps: Record<BackendServiceName, string[]> = {
     'install builtin custom nodes',
     'install comfyUI manager',
   ],
-  'home-agent-backend': ['start', 'install dependencies'],
   'qwen3-tts-backend': ['start', 'install dependencies'],
   'whisper-backend': ['start', 'install dependencies'],
 }
@@ -122,7 +119,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
   const demoMode = useDemoMode()
   const speechToText = useSpeechToText()
   const textToSpeech = useTextToSpeech()
-  const homeAgent = useHomeAgent()
   const cloudMode = useCloudMode()
   const errors = useErrors()
 
@@ -131,8 +127,7 @@ export const useSetupWizard = defineStore('setupWizard', () => {
   const installSelection = ref(new Set<BackendServiceName>())
   const disabledBackends = ref(new Set<BackendServiceName>())
   const wizardDirty = ref(false)
-  const wizardPage = ref<'main' | 'homeAgentSetup' | 'cloudModeSetup'>('main')
-  const homeAgentSetupOrigin = ref<'install' | 'edit'>('install')
+  const wizardPage = ref<'main' | 'cloudModeSetup'>('main')
 
   const wizardActivity = ref(new Map<BackendServiceName, string>())
 
@@ -725,11 +720,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
     installSelection.value = new Set(selectDefaultInstalls(candidates))
   }
 
-  function isHomeAgentInstalledAndActive(): boolean {
-    const info = backendServices.info.find((s) => s.serviceName === 'home-agent-backend')
-    return info?.isSetUp === true && !disabledBackends.value.has('home-agent-backend')
-  }
-
   async function toggleBackend(serviceName: BackendServiceName, value: boolean) {
     const info = backendServices.info.find((s) => s.serviceName === serviceName)
     if (value) {
@@ -811,21 +801,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
     seedInstallSelection()
     wizardDirty.value = false
     wizardPage.value = 'main'
-    globalSetup.loadingState = 'setupWizard'
-  }
-
-  async function openHomeAgentSetup() {
-    if (!productModeStore.hardwareRecommendation) {
-      await productModeStore.detectRecommendation()
-    }
-    pendingProductMode.value =
-      productModeStore.productMode ??
-      productModeStore.hardwareRecommendation?.recommendedMode ??
-      null
-    seedInstallSelection()
-    wizardDirty.value = false
-    homeAgentSetupOrigin.value = 'edit'
-    wizardPage.value = 'homeAgentSetup'
     globalSetup.loadingState = 'setupWizard'
   }
 
@@ -988,20 +963,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
       if (anyFailed) return
     }
 
-    const noChannelVerified = CHANNELS.every((c) => !homeAgent.channelPrefs[c.kind].verified)
-    if (noChannelVerified) {
-      const homeAgentJustInstalled = toInstall.some((r) => r.serviceName === 'home-agent-backend')
-      if (homeAgentJustInstalled || isHomeAgentInstalledAndActive()) {
-        // Sync presets *before* swapping the wizard page so the Home Agent setup
-        // step (and anything downstream of it) sees a consistent preset list
-        // that reflects the just-installed backend.
-        await syncPresetsForCurrentProductMode()
-        homeAgentSetupOrigin.value = 'install'
-        wizardPage.value = 'homeAgentSetup'
-        return
-      }
-    }
-
     await dismiss()
     await syncPresetsForCurrentProductMode()
   }
@@ -1028,15 +989,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
     const stopStatus = await backendServices.stopService(name)
     if (stopStatus !== 'stopped') {
       console.warn(`Repair of ${name}: stop reported '${stopStatus}', continuing with reinstall`)
-    }
-    // Clear Home Agent channel configs on reinstall so the user must re-verify
-    // each channel before turning it back on. Both Telegram and Slack credentials
-    // are wiped — the backend's safeStorage files and the bot/Slack-app tokens
-    // injected into the running service must not survive a reinstall.
-    if (name === 'home-agent-backend') {
-      for (const c of CHANNELS) {
-        await homeAgent.clearChannelConfig(c.kind)
-      }
     }
     await installBackend(name)
   }
@@ -1101,21 +1053,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
     textToSpeech.initialize()
   }
 
-  /**
-   * Finish the Home Agent setup step and close the wizard. Mirrors the normal
-   * install path which calls `dismiss()` followed by `syncPresetsForCurrentProductMode()`,
-   * so leaving the wizard via Home Agent setup also refreshes preset state.
-   */
-  async function finishHomeAgentSetup() {
-    await dismiss()
-    // Reset the wizard page after the wizard is hidden (dismiss set loadingState
-    // to 'running') so HomeAgentSetupPage unmounts and its local UI state
-    // (active tab, Reconfigure expansion) starts fresh on the next open. The
-    // outer wizard uses v-show, so without this the page would stay mounted.
-    wizardPage.value = 'main'
-    await syncPresetsForCurrentProductMode()
-  }
-
   /** Open the Cloud Mode provider setup screen. Frontend-only — no backend
    *  install is involved, so this just swaps the wizard page. */
   async function openCloudModeSetup() {
@@ -1124,8 +1061,7 @@ export const useSetupWizard = defineStore('setupWizard', () => {
     globalSetup.loadingState = 'setupWizard'
   }
 
-  /** Finish Cloud Mode setup and close the wizard, mirroring the Home Agent
-   *  finish path so preset state is refreshed on exit. */
+  /** Finish Cloud Mode setup and close the wizard, refreshing preset state on exit. */
   async function finishCloudModeSetup() {
     await dismiss()
     wizardPage.value = 'main'
@@ -1154,7 +1090,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
     installSelection,
     wizardDirty,
     wizardPage,
-    homeAgentSetupOrigin,
     backendRows,
     isBusy,
     rowsNeedingInstall,
@@ -1168,7 +1103,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
 
     initialize,
     openWizard,
-    openHomeAgentSetup,
     setPendingMode,
     seedInstallSelection,
     toggleBackend,
@@ -1176,7 +1110,6 @@ export const useSetupWizard = defineStore('setupWizard', () => {
     phisonAidaptivRow,
     commitAndInstall,
     dismiss,
-    finishHomeAgentSetup,
     openCloudModeSetup,
     finishCloudModeSetup,
     installBackend,

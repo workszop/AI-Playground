@@ -1,8 +1,8 @@
 // Single source of truth for "what shippable media does a finished tool part
 // contain". Tool outputs put their user-visible media in tool-specific shapes
 // (`output.images[]`, `output.dataUri`, `output.annotatedImageUrl`, …). Anything
-// that needs to forward that media without re-rendering it (today: the Home Agent
-// channel shipper) should go through `extractToolMedia` instead of re-encoding
+// that needs to list that media without re-rendering it should go through
+// `extractToolMedia` instead of re-encoding
 // per-tool knowledge. A new media-producing tool only needs a case added here.
 
 export type ToolMediaKind = 'image' | 'video' | 'model3d'

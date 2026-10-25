@@ -10,7 +10,7 @@ import { ref } from 'vue'
 // avoid circular imports — producers push, consumers read. At most one pending
 // confirmation per conversation (a new request supersedes an older one).
 
-export type ConfirmationOrigin = 'desktop' | 'remote'
+export type ConfirmationOrigin = 'desktop'
 
 export type PendingConfirmation = {
   id: string
@@ -19,9 +19,6 @@ export type PendingConfirmation = {
   title: string
   summaryMarkdown: string
   origin: ConfirmationOrigin
-  // For `origin: 'remote'`, the channel the question was also posted to (e.g.
-  // 'telegram'), so the mirrored desktop card can explain itself.
-  channelLabel?: string
 }
 
 export type ConfirmationRequest = Omit<PendingConfirmation, 'id'>
@@ -52,7 +49,7 @@ export const useConfirmations = defineStore('confirmations', () => {
   }
 
   // Settle + remove. Idempotent: a second call for an already-settled id is a
-  // no-op, so racing desktop/channel/timeout paths can all call it safely.
+  // no-op, so racing desktop/timeout paths can all call it safely.
   function resolve(id: string, answer: boolean): void {
     const resolver = resolvers.get(id)
     if (!resolver) return

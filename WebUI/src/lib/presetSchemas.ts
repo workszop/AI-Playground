@@ -153,10 +153,6 @@ const BasePresetFieldsSchema = z.object({
   mediaType: z.enum(['image', 'video', 'model3d']).optional(), // Specifies what type of media the preset generates
   toolInstructions: z.string().optional(), // Instructions for the AI on how to generate prompts for this preset
   toolCategory: z.string().optional(), // Category for tool organization (e.g. 'create-images', 'edit-images'). Presets without toolCategory are not available as tools.
-  // When true, hide this preset from the Home Agent (Telegram) /imgGen picker.
-  // Set on presets that need extra UI configuration (e.g. manual sliders, reference
-  // image uploads) and therefore can't be driven cleanly via a chat command.
-  excludeFromHomeAgentPicker: z.boolean().optional(),
 })
 
 // ComfyUI Preset Schema
@@ -245,10 +241,6 @@ export const ChatPresetSchema = BasePresetFieldsSchema.omit({ backend: true }).e
   filterTxt2TxtOnly: z.boolean().optional(), // Filter out vision AND reasoning models
   filterLargeMoeOnly: z.boolean().optional(), // Only show large MoE models (e.g. for the Phison aiDAPTIV+ preset)
   advancedMode: z.boolean().optional(), // Show advanced features: unspecified models + system prompt editing + vision model support
-  // When true, the preset is hidden from the standard chat PresetSelector. Used for built-in
-  // presets that drive a specific feature (e.g. Home Agent / Telegram) and should not be
-  // selectable from the normal Chat Settings picker.
-  excludeFromChatPresetPicker: z.boolean().optional(),
 })
 
 // Discriminated Union for all Preset types
@@ -267,6 +259,12 @@ export type ComfyUIApiWorkflow = z.infer<typeof ComfyUIApiWorkflowSchema>
 export type Preset = z.infer<typeof PresetSchema>
 export type ComfyUiPreset = z.infer<typeof ComfyUiPresetSchema>
 export type ChatPreset = z.infer<typeof ChatPresetSchema>
+
+const REMOVED_CHAT_PRESET_NAMES = new Set(['Home Agent'])
+
+export function isRemovedChatPresetName(name: string): boolean {
+  return REMOVED_CHAT_PRESET_NAMES.has(name)
+}
 
 // ============================================================================
 // Pure derivations
@@ -299,7 +297,9 @@ export function ignoresSavedInput(input: ComfyInput): boolean {
 
 export function validatePreset(data: unknown): Preset | null {
   try {
-    return PresetSchema.parse(data)
+    const preset = PresetSchema.parse(data)
+    if (preset.type === 'chat' && isRemovedChatPresetName(preset.name)) return null
+    return preset
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errorMessages = error.issues

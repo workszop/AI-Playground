@@ -1,7 +1,7 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import type { UIMessage } from 'ai'
-import { useConversations, type ThreadKind } from './conversations'
+import { useConversations } from './conversations'
 import { useAgentMode } from './agentMode'
 import { useImageGenerationPresets, hasDisplayableMedia } from './imageGenerationPresets'
 import { usePresets } from './presets'
@@ -84,8 +84,7 @@ export const useHistorySessions = defineStore('historySessions', () => {
     Object.entries(conversations.conversationList).map(([key, stored]) => {
       const messages = stored as UIMessage[]
       const meta = conversations.conversationThreadMeta[key]
-      const threadKind = conversations.getThreadKind(key)
-      const draft = messages.length === 0 && threadKind === 'main'
+      const draft = messages.length === 0
       const presetName = meta?.presetName || (draft ? draftPresetName.value : undefined)
       return {
         kind: 'conversation',
@@ -93,7 +92,6 @@ export const useHistorySessions = defineStore('historySessions', () => {
         title: conversationTitle(messages),
         presetName,
         mode: conversationMode(modeOfPreset(presetName)),
-        threadKind,
         variant: meta?.variant ?? null,
         ragDocHashes: conversations.conversationRagSelection[key],
         messages,
@@ -156,16 +154,6 @@ export const useHistorySessions = defineStore('historySessions', () => {
    */
   const currentMode = computed<ModeType>(() => promptStore.currentMode)
 
-  /**
-   * Home Agent is a mode in all but name: sitting on a remote thread makes the
-   * current-mode list the remote one, and there is no chip to pick it — the
-   * thread the app is on decides, the way the mode buttons decide the rest.
-   */
-  const conversationScope = computed<ThreadKind>(() => {
-    if (currentMode.value !== 'chat' && currentMode.value !== 'audio') return 'main'
-    return conversations.getThreadKind(conversations.activeKey)
-  })
-
   const matchingEntries = computed<HistoryEntry[]>(() =>
     searchEntries(
       entries.value.filter((entry) =>
@@ -174,7 +162,6 @@ export const useHistorySessions = defineStore('historySessions', () => {
           currentMode: currentMode.value,
           agentPresetName: agentMode.agentPresetName,
           activeConversationId: conversations.activeKey,
-          threadScope: conversationScope.value,
         }),
       ),
       query.value,
@@ -341,7 +328,6 @@ export const useHistorySessions = defineStore('historySessions', () => {
     visibleEntries,
     pinnedDraft,
     currentMode,
-    conversationScope,
     newMediaSelected,
     refreshGameNames,
     isActive,

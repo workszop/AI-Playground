@@ -9,23 +9,6 @@
         @update:variant="handleVariantChange"
       />
 
-      <!-- When the Home Agent preset is the active chat preset, surface a
-           global-settings warning. These knobs apply to every Home Agent
-           conversation (Telegram + desktop), so changes can lock the user
-           out of remote access if not verified. -->
-      <div
-        v-if="isHomeAgentPresetActive"
-        class="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-sm text-foreground"
-      >
-        <SettingsHeading class="text-amber-600 dark:text-amber-200"
-          >Global Home Agent Settings</SettingsHeading
-        >
-        <p class="text-xs text-muted-foreground">
-          The settings for this preset impact all Home Agent conversations. Please verify after
-          changing them to ensure that you can still access AI Playground remotely.
-        </p>
-      </div>
-
       <div class="flex flex-col gap-4">
         <!-- Backend selector - only shown when multiple backends are available -->
         <SettingsRow v-if="!isBackendLocked" label="Backend">
@@ -302,7 +285,6 @@ import DeviceSelector from '@/components/DeviceSelector.vue'
 import ProviderSelector from '@/components/ProviderSelector.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import SettingsButton from '@/components/SettingsButton.vue'
-import SettingsHeading from '@/components/SettingsHeading.vue'
 import SettingsRow from '@/components/SettingsRow.vue'
 import { DocumentTextIcon, PlusIcon } from '@heroicons/vue/24/solid'
 import CapabilityIcons from '@/components/CapabilityIcons.vue'
@@ -318,9 +300,7 @@ import { usePresetSwitching } from '@/assets/js/store/presetSwitching.ts'
 import PresetSelector from '@/components/PresetSelector.vue'
 import * as toast from '@/assets/js/toast'
 import { useProductMode } from '@/assets/js/store/productMode'
-import { useConversations, HOME_AGENT_CHAT_PRESET_NAME } from '@/assets/js/store/conversations'
 import { useContextSizeField } from '@/assets/js/contextSizeField'
-import { useHomeAgent } from '@/assets/js/store/homeAgent'
 import { useCloudMode } from '@/assets/js/store/cloudMode'
 import { reasoningEfforts, type ReasoningEffort } from '@/types/shared'
 import { useEmbeddingModelPicker } from '@/assets/js/embeddingModelPicker'
@@ -338,8 +318,6 @@ const presetsStore = usePresets()
 const presetSwitching = usePresetSwitching()
 const backendServices = useBackendServices()
 const productModeStore = useProductMode()
-const conversations = useConversations()
-const homeAgent = useHomeAgent()
 const cloudMode = useCloudMode()
 const uiStore = useUIStore()
 
@@ -347,10 +325,6 @@ const uiStore = useUIStore()
 // non-cloud backends; cloud uses ProviderSelector instead).
 const deviceServiceName = computed(
   () => backendToService[textInference.backend] ?? 'llamacpp-backend',
-)
-
-const isHomeAgentPresetActive = computed(
-  () => presetsStore.activePresetName === HOME_AGENT_CHAT_PRESET_NAME,
 )
 
 // Get the active chat preset
@@ -439,28 +413,11 @@ function handleBackendChange(newBackend: string) {
 }
 
 async function handlePresetChange(presetName: string) {
-  // Route the active conversation alongside the preset:
-  //   • picking Home Agent jumps to the most-recently routed Home Agent thread
-  //     (so the Telegram bridge and this view share the same conversation)
-  //   • picking any other chat preset off a Home Agent thread spawns a fresh
-  //     main conversation so the user isn't writing into Home Agent state
-  //     with a non-Home-Agent preset.
-  const switchingToHomeAgent = presetName === HOME_AGENT_CHAT_PRESET_NAME
-  const onHomeAgentThread = conversations.getThreadKind(conversations.activeKey) === 'homeAgent'
-
   // The mode follows the preset: an agent preset in this list switches the app to
   // Agent Mode, so the switch is not told to stay put.
   const result = await presetSwitching.switchPreset(presetName)
 
   if (result.success) {
-    // Only reroute the conversation after the preset switch actually succeeds —
-    // otherwise a failed switch would leave the UI on a different thread while
-    // the picker stayed on the previous preset.
-    if (switchingToHomeAgent) {
-      conversations.activeKey = homeAgent.ensureActiveRemoteConversation()
-    } else if (onHomeAgentThread) {
-      conversations.addNewConversation()
-    }
     toast.success(`Switched to ${presetName}`)
   } else if (result.error) {
     toast.error(`Failed to switch preset: ${result.error}`)

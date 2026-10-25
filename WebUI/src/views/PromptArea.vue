@@ -453,8 +453,7 @@ import { useOpenAiCompatibleChat } from '@/assets/js/store/openAiCompatibleChat'
 import { useAgentMode } from '@/assets/js/store/agentMode'
 import { useOemBranding } from '@/assets/js/store/oemBranding'
 import { MODE_TO_CATEGORIES, MODE_TO_PRESET_TYPE, buttonModeFor } from '@/lib/presetModes'
-import { useConversations, HOME_AGENT_CHAT_PRESET_NAME } from '@/assets/js/store/conversations'
-import { useHomeAgent } from '@/assets/js/store/homeAgent'
+import { useConversations } from '@/assets/js/store/conversations'
 import { useBackendServices } from '@/assets/js/store/backendServices'
 import { useActivities } from '@/assets/js/store/activities'
 import { useErrors } from '@/assets/js/store/errors'
@@ -497,7 +496,6 @@ const textareaRef = ref<HTMLTextAreaElement>()
 const isTextareaFocused = ref(false)
 const presetsStore = usePresets()
 const presetSwitching = usePresetSwitching()
-const homeAgent = useHomeAgent()
 const backendServices = useBackendServices()
 const dialogStore = useDialogStore()
 
@@ -521,15 +519,6 @@ function presetGate(preset: Preset): { enabled: boolean; reason?: string } {
     return phisonUsable.value
       ? { enabled: true }
       : { enabled: false, reason: 'Install and activate the aiDAPTIV™ build to use this preset.' }
-  }
-  if (preset.name === HOME_AGENT_CHAT_PRESET_NAME) {
-    if (!homeAgent.masterEnabled) {
-      return { enabled: false, reason: 'Enable the Home Agent in settings to use this preset.' }
-    }
-    if (!homeAgent.isAvailable) {
-      return { enabled: false, reason: 'The Home Agent backend is not installed or running yet.' }
-    }
-    return { enabled: true }
   }
   return { enabled: true }
 }
@@ -648,21 +637,10 @@ async function selectPresetFromPicker(mode: ModeType, preset: Preset) {
   // switch too (skipPresetSwitch: we pick the preset ourselves right after).
   if (!promptStore.setCurrentMode(mode, { skipPresetSwitch: true })) return
 
-  // Route the active conversation alongside the preset, mirroring SettingsChat:
-  // Home Agent jumps to its remote thread; leaving a Home Agent thread for another
-  // preset spawns a fresh main conversation so we don't write into Home Agent state.
-  const switchingToHomeAgent = preset.name === HOME_AGENT_CHAT_PRESET_NAME
-  const onHomeAgentThread = conversations.getThreadKind(conversations.activeKey) === 'homeAgent'
-
   // The mode is left to the switch: an agent preset from the chat list moves the app
   // to Agent Mode, which the button above cannot know.
   const result = await presetSwitching.switchPreset(preset.name)
   if (result.success) {
-    if (switchingToHomeAgent) {
-      conversations.activeKey = homeAgent.ensureActiveRemoteConversation()
-    } else if (onHomeAgentThread) {
-      conversations.addNewConversation()
-    }
     toast.success(`Switched to ${preset.name}`)
   } else if (result.error) {
     toast.error(`Failed to switch preset: ${result.error}`)

@@ -1,9 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import type {
-  ConversationsInvokeName,
-  InvokeHandlerMap,
-  MainInvokeChannelName,
-} from '../../kernel/ipcRegistries'
+import type { ConversationsInvokeName, InvokeHandlerMap } from '../../kernel/ipcRegistries'
 import type { buildConversationsRegistry } from '../../kernel/registries/conversations'
 
 // Compile-time registry proofs (#301 batch A): vue-tsc enforces every
@@ -20,12 +16,6 @@ describe('per-owner handler registries', () => {
       | 'conversations:delete'
       | 'conversations:saveLastMainKey'
     >()
-  })
-
-  it('keeps homeAgent-owned rows out of the main-side names', () => {
-    expectTypeOf<
-      Extract<MainInvokeChannelName, `channel:${string}` | `homeAgent:${string}`>
-    >().toBeNever()
   })
 
   it('builds a registry keyed by exactly the conversations domain', () => {

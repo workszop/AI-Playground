@@ -37,7 +37,6 @@ import type {
 } from '../../adapters/backends/comfyUIBackendService'
 import type { LLAMACPP_DEFAULT_PARAMETERS } from '../../adapters/backends/llamaCppBackendService'
 import type { AiBackendService } from '../../adapters/backends/aiBackendService'
-import type { HomeAgentBackendService } from '../../adapters/backends/homeAgentBackendService'
 import type { Qwen3TtsBackendService } from '../../adapters/backends/qwen3TtsBackendService'
 import type { WhisperBackendService } from '../../adapters/backends/whisperBackendService'
 import type {
@@ -170,7 +169,6 @@ export type CoreDeps = {
   LLAMACPP_DEFAULT_PARAMETERS: typeof LLAMACPP_DEFAULT_PARAMETERS
   AiBackendService: typeof AiBackendService
   ComfyUiBackendService: typeof ComfyUiBackendService
-  HomeAgentBackendService: typeof HomeAgentBackendService
   Qwen3TtsBackendService: typeof Qwen3TtsBackendService
   WhisperBackendService: typeof WhisperBackendService
 }
@@ -491,35 +489,6 @@ export function buildCoreInvokeRegistry(deps: CoreDeps) {
       }
     },
 
-    // Persist an inbound Home Agent document (base64) to disk so the langchain
-    // RAG loaders (which require a real filepath) can index it, and so the
-    // persisted ragList entry keeps a stable path. Returns the absolute path.
-    saveHomeAgentDocument: async (
-      _event,
-      filename: string,
-      base64: string,
-    ): Promise<IpcOkWith<{ filepath: string }>> => {
-      const supportedExtensions = ['txt', 'md', 'doc', 'docx', 'pdf']
-      try {
-        if (typeof filename !== 'string' || typeof base64 !== 'string') {
-          return { success: false, error: 'invalid arguments' }
-        }
-        const safeName = path.basename(filename).replace(/[^\w.\-]+/g, '_')
-        const ext = safeName.includes('.') ? safeName.split('.').pop()!.toLowerCase() : ''
-        if (!supportedExtensions.includes(ext)) {
-          return { success: false, error: `unsupported document type (.${ext})` }
-        }
-        const ragDocumentsDir = path.join(deps.mediaDir, 'rag-documents')
-        await fs.promises.mkdir(ragDocumentsDir, { recursive: true })
-        const uniqueName = `${randomUUID()}-${safeName}`
-        const filePath = path.join(ragDocumentsDir, uniqueName)
-        await fs.promises.writeFile(filePath, Buffer.from(base64, 'base64'))
-        return { success: true, filepath: filePath }
-      } catch (e) {
-        return ipcFail(e)
-      }
-    },
-
     readAipgMediaAsBase64: async (
       _event,
       url: string,
@@ -752,9 +721,6 @@ export function buildCoreInvokeRegistry(deps: CoreDeps) {
         return service.getLoopbackAuthToken()
       }
       if (service instanceof deps.ComfyUiBackendService) {
-        return service.getLoopbackAuthToken()
-      }
-      if (service instanceof deps.HomeAgentBackendService) {
         return service.getLoopbackAuthToken()
       }
       if (service instanceof deps.Qwen3TtsBackendService) {

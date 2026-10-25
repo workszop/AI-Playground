@@ -1,6 +1,4 @@
-// Headless model-download helpers, decoupled from any UI. Shared by the desktop
-// DownloadDialog and the Home Agent remote-download path so the SSE / metadata
-// logic lives in exactly one place.
+// Model-download helpers shared by the desktop dialog and its cancellation cleanup.
 
 import { aipgFetch } from '@/lib/loopbackAuth'
 import { SSEProcessor } from '@/assets/js/sseProcessor'
@@ -135,21 +133,51 @@ export function runModelDownload(
     const total = list.length
     let completeCount = 0
     let settled = false
+    let settling = false
+    let stopPromise: Promise<void> | undefined
+
+    const stopDownload = (): Promise<void> => {
+      stopPromise ??= aipgFetch(`${opts.apiHost}/api/stopDownloadModel`)
+        .then(() => undefined)
+        .catch(() => {})
+      return stopPromise
+    }
+
+    const cleanup = () => opts.signal?.removeEventListener('abort', onAbort)
+    const settle = (done: () => void) => {
+      if (settled || settling) return
+      settling = true
+      const complete = () => {
+        settled = true
+        cleanup()
+        done()
+      }
+      if (opts.signal?.aborted) void stopDownload().then(complete, complete)
+      else complete()
+    }
 
     const finish = () => {
-      if (settled) return
-      settled = true
-      resolve()
+      settle(resolve)
     }
     const fail = (error: Error) => {
-      if (settled) return
-      settled = true
-      reject(error)
+      settle(() => reject(error))
     }
+
+    if (opts.signal?.aborted) {
+      settled = true
+      reject(new Error('The model download was cancelled.'))
+      return
+    }
+
+    const onAbort = () => {
+      void stopDownload()
+    }
+    opts.signal?.addEventListener('abort', onAbort, { once: true })
 
     const taskPercent = () => (total > 0 ? Math.round((completeCount / total) * 1000) / 10 : 0)
 
     const onLine = (line: string) => {
+      if (settled || settling || opts.signal?.aborted) return
       if (!line.startsWith('data:')) return
       let data: LLMOutCallback
       try {
@@ -188,7 +216,7 @@ export function runModelDownload(
         case 'error': {
           const detail = mapDownloadError(data)
           opts.onError?.(detail)
-          void aipgFetch(`${opts.apiHost}/api/stopDownloadModel`).catch(() => {})
+          void stopDownload()
           fail(new Error(detail.message))
           break
         }

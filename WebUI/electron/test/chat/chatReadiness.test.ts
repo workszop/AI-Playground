@@ -21,23 +21,19 @@ function wire(overrides: Record<string, unknown> = {}) {
   const ensureBackendReadiness = vi.fn(async () => {})
   const awaitChatWindow = vi.fn(async () => {})
   const stopOvmsImageServer = vi.fn(async () => {})
-  const notifyHomeAgentUpstreamReady = vi.fn()
   const getService = vi.fn(() => ({
     ensureBackendReadiness,
-    baseUrl: 'http://127.0.0.1:39100',
   }))
   setChatReadinessDeps({
     getService,
     awaitChatWindow,
     stopOvmsImageServer,
-    notifyHomeAgentUpstreamReady,
     ...overrides,
   })
   return {
     ensureBackendReadiness,
     awaitChatWindow,
     stopOvmsImageServer,
-    notifyHomeAgentUpstreamReady,
     getService,
   }
 }
@@ -59,14 +55,13 @@ describe('chatReadiness', () => {
     await expect(ensureChatBackendReady(loadArgs)).rejects.toThrow('not wired')
   })
 
-  it('admits the GPU window, stops OVMS image, loads, remembers, and notifies', async () => {
+  it('admits the GPU window, stops OVMS image, loads, and remembers', async () => {
     const d = wire()
     await ensureChatBackendReady(loadArgs)
 
     expect(d.awaitChatWindow).toHaveBeenCalledTimes(1)
     expect(d.stopOvmsImageServer).toHaveBeenCalledTimes(1)
     expect(d.ensureBackendReadiness).toHaveBeenCalledWith('Qwen3-9B', 'bge', 8192, '--jinja')
-    expect(d.notifyHomeAgentUpstreamReady).toHaveBeenCalledWith('http://127.0.0.1:39100')
     expect(lastChatBackendLoadForTest()).toEqual(loadArgs)
   })
 
@@ -77,7 +72,6 @@ describe('chatReadiness', () => {
     wire({
       getService: () => ({
         ensureBackendReadiness,
-        baseUrl: 'http://127.0.0.1:39100',
       }),
     })
     await expect(ensureChatBackendReady(loadArgs)).rejects.toThrow('OOM')

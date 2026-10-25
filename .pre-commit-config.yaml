@@ -23,7 +23,7 @@ repos:
       - id: ruff
         name: ruff lint (Python)
         args: [--fix]
-        files: ^(service|home-agent|qwen3-tts|backend_shared|comfyui-deps|OpenVINO)/.*\.py$
+        files: ^(service|qwen3-tts|backend_shared|comfyui-deps|OpenVINO)/.*\.py$
 
   - repo: local
     hooks:
@@ -34,7 +34,7 @@ repos:
         # --force-exclude: without it ruff ignores ruff.toml's excludes for the
         # filenames pre-commit passes explicitly, and reformats vendored trees.
         entry: bash -c 'uvx ruff@0.15.20 format --force-exclude "$@" && git add -- "$@"' --
-        files: ^(service|home-agent|qwen3-tts|backend_shared|comfyui-deps|OpenVINO)/.*\.py$
+        files: ^(service|qwen3-tts|backend_shared|comfyui-deps|OpenVINO)/.*\.py$
         require_serial: true
       # Linter (ESLint with auto-fix)
       - id: eslint

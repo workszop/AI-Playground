@@ -1,5 +1,9 @@
 # Architecture as landed — processes, persistence, common sequences
 
+> **Historical snapshot:** Home Agent references in this document describe the implementation
+> before that feature was removed. They are retained as historical context, not current product
+> guidance.
+
 **This is the implementation after migration steps 1–15**, not the target in
 [`architecture-target.md`](./architecture-target.md). That file's §2 "Today" diagram is the
 draft-time symptom picture (chat `streamText` in the renderer, media as UI mutation). Steps 1–7

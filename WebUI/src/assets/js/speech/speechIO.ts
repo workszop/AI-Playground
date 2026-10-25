@@ -22,10 +22,10 @@ import type {
  * Speech I/O adapter — the one engine seam every speech driver crosses (§4.2
  * of docs/architecture-target.md): the mic and STT preset, the `transcribeAudio`
  * tool, "Speak replies" and the Speak button, the `synthesizeTextToSpeech`
- * tool, and the Home Agent voice paths. Engine selection, readiness, endpoint
- * resolution and the engine clients (Whisper OVMS / standalone sidecar /
- * external, Qwen3-TTS / Kokoro / external) live behind this module; drivers
- * must not import the TTS/STT stores or branch on the engine themselves.
+ * tool. Engine selection, readiness, endpoint resolution and the engine clients
+ * (Whisper OVMS / standalone sidecar / external, Qwen3-TTS / Kokoro / external)
+ * live behind this module; drivers must not import the TTS/STT stores or branch
+ * on the engine themselves.
  *
  * Engine config and the clients themselves stay in the stores for now
  * (`speechToText`, `textToSpeech`, `qwen3TextToSpeech`) — settings panels read
@@ -74,14 +74,6 @@ export type SpeechVoiceRequest = {
 export type SynthesizeClipRequest = {
   text: string
   voice?: SpeechVoiceRequest
-  /**
-   * Unattended callers (Home Agent channels): never prompt a download; return
-   * `null` instead when the engine's prerequisites (installed backend, model
-   * on disk, configured endpoint) are missing.
-   */
-  unattended?: boolean
-  /** Channels transcode to Opus and need universally-supported WAV. */
-  format?: 'wav'
   /** Engine phase signal for activity-driven callers (the TTS tool). */
   onPhase?: (phase: 'loading-model' | 'generating') => void
 }
@@ -98,22 +90,6 @@ export async function readyTranscriptionForInput(): Promise<SttReadyResult> {
   if (speechToText.effectiveSttEngine === 'whisper') return speechToText.ensureWhisperReady()
   if (speechToText.effectiveSttEngine === 'standalone') return speechToText.ensureStandaloneReady()
   return { downloadPrompted: false }
-}
-
-/**
- * Unattended STT readiness — starts the selected engine's server when it is
- * installed and its model is already on disk, and never prompts (a remote
- * sender cannot answer a download popup on the host).
- */
-export async function readyTranscriptionUnattended(): Promise<void> {
-  const speechToText = useSpeechToText()
-  // The standalone sidecar resolves its endpoint from the registered service's
-  // baseUrl whether or not the process is running, so it needs the explicit
-  // start; every other engine's resolver checks liveness itself.
-  if (speechToText.effectiveSttEngine === 'standalone') {
-    return speechToText.ensureStandaloneServerRunning()
-  }
-  return speechToText.ensureTranscriptionServerRunning()
 }
 
 /** Whether any STT engine is usable (OpenVINO Whisper, the standalone sidecar
@@ -136,8 +112,8 @@ export function synthesizeToolAvailable(): boolean {
  * Transcribe an audio blob through the endpoint of the selected engine. WAV
  * input goes to the server unconverted; anything else (webm, ogg/opus, mp3 …)
  * is converted first. Throws (with {@link NO_TRANSCRIPTION_ENDPOINT}) when no
- * endpoint can be resolved — read `readyTranscriptionForInput` /
- * `readyTranscriptionUnattended` first; the external engine needs nothing.
+ * endpoint can be resolved — read `readyTranscriptionForInput` first; the
+ * external engine needs nothing.
  */
 export async function transcribe(req: { audio: Blob }): Promise<TranscriptResult> {
   const speechToText = useSpeechToText()
@@ -159,29 +135,16 @@ export async function transcribe(req: { audio: Blob }): Promise<TranscriptResult
 
 /**
  * Synthesize a speech clip through the user's selected engine — the shared
- * engine path of the `synthesizeTextToSpeech` tool (Artifact's `create-speech`
- * to be) and the Home Agent voice reply. Qwen3 honors the full voice request;
+ * engine path of the `synthesizeTextToSpeech` tool. Qwen3 honors the full voice request;
  * Kokoro and the external endpoint synthesize with their configured voice.
- *
- * Attended synthesis throws on failure; only an `unattended` request can
- * resolve `null` (prerequisites missing), which the overloads keep honest in
- * the type — attended callers may use the clip without a null check.
  */
-export function synthesizeClip(
-  req: SynthesizeClipRequest & { unattended: true },
-): Promise<SpeechClipResult | null>
 export function synthesizeClip(req: SynthesizeClipRequest): Promise<SpeechClipResult>
-export async function synthesizeClip(req: SynthesizeClipRequest): Promise<SpeechClipResult | null> {
+export async function synthesizeClip(req: SynthesizeClipRequest): Promise<SpeechClipResult> {
   const tts = useTextToSpeech()
   const text = req.text
 
   if (tts.selectedEngine === 'qwen3') {
     const qwen3 = useQwen3TextToSpeech()
-    if (req.unattended) {
-      // `synthesize` would open the download popup for a missing model, so
-      // check first and bail out instead.
-      if (!qwen3.isBackendSetUp() || !(await qwen3.isModelInstalled())) return null
-    }
     const voice = req.voice
     if (voice?.rememberAsDefault) {
       await qwen3.applyUserVoicePreference({
@@ -218,20 +181,21 @@ export async function synthesizeClip(req: SynthesizeClipRequest): Promise<Speech
   }
 
   req.onPhase?.('generating')
-  return kokoroExternalClip({ text, interactive: !req.unattended, format: req.format })
+  return await kokoroExternalClip({ text, interactive: true })
 }
 
-/**
- * The one Kokoro/external wire-up, shared by attended and unattended
- * synthesis and by desktop playback. Attended goes through the TTS store's
- * `synthesizeToWav` (which may prompt the Kokoro model download); unattended
- * starts the OVMS speech server dialog-free and bails out (`null`) when no
- * endpoint can serve.
- */
+/** The Kokoro/external wire-up shared by speech-tool synthesis and playback. */
+async function kokoroExternalClip(req: {
+  text: string
+  interactive: true
+}): Promise<SpeechClipResult>
+async function kokoroExternalClip(req: {
+  text: string
+  interactive: false
+}): Promise<SpeechClipResult | null>
 async function kokoroExternalClip(req: {
   text: string
   interactive: boolean
-  format?: 'wav'
 }): Promise<SpeechClipResult | null> {
   const tts = useTextToSpeech()
 
@@ -252,11 +216,7 @@ async function kokoroExternalClip(req: {
   await tts.ensureSpeechServerRunning()
   const endpoint = await tts.resolveSpeech()
   if (!endpoint) return null
-  const { bytes, mediaType } = await synthesizeSpeech(
-    req.text,
-    endpoint,
-    req.format ? { format: req.format } : undefined,
-  )
+  const { bytes, mediaType } = await synthesizeSpeech(req.text, endpoint)
   return {
     audioBase64: bytesToBase64(bytes),
     mediaType: mediaType || 'audio/wav',
@@ -340,9 +300,7 @@ export async function speak(req: { text: string; messageId?: string }): Promise<
   speakingMessageId.value = req.messageId ?? null
 
   try {
-    // Reply playback synthesizes through the shared non-Qwen3 path in its
-    // unattended shape: it never prompts (a download popup has nowhere to land
-    // mid-reply), degrading to a reported unavailability instead.
+    // Reply playback uses the non-Qwen3 path without opening a download prompt.
     const clip = await kokoroExternalClip({ text: trimmed, interactive: false })
     if (gen !== speakGeneration) return
     if (!clip) {

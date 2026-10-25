@@ -5,10 +5,8 @@ import { app } from 'electron'
 import { writableConfigRoot } from '../kernel/aipgRoot.ts'
 import { typedSend } from '../kernel/typedIpc'
 
-// Telegram bot tokens (`<id>:<token>`) and similar secrets must never appear in
-// console output, log files, or the renderer debug stream. Belt-and-suspenders
-// alongside the Python-side filter — the same regex catches httpx URL forms,
-// werkzeug logs, and any future direct token logging.
+// Bot tokens (`<id>:<token>`) and similar secrets must never appear in console
+// output, log files, or the renderer debug stream.
 // No \b on the digit side: tokens embed inside URLs like `…/bot<id>:<token>/…`,
 // where `bot` is letters and the next char is a digit (no \b between them).
 const TOKEN_PATTERN = /\d{6,}:[A-Za-z0-9_-]{20,}/g

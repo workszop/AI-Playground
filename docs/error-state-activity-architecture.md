@@ -1,5 +1,9 @@
 # Error, State & Activity Architecture
 
+> **Historical snapshot:** Any Home Agent references in this document describe the implementation
+> before that feature was removed. They are retained as historical context, not current product
+> guidance.
+
 This document describes the cross-cutting primitives that the AI Playground desktop UI uses to
 handle **errors**, **lifecycle/generation state**, and **long-running activity/progress**. These were
 introduced to replace ad-hoc, per-call-site flags and toasts that had accreted over time and caused
@@ -59,7 +63,7 @@ through silently:
 
 - Producers attach a stable `code` (e.g. `inference/stream-failed`, `generation/timeout`) and a
   concise `userMessage`. Verbose detail goes in `technicalMessage`.
-- Background work (e.g. Home Agent side-channel turns) reports with `surface: 'silent'` so it is
+- Background work that has no user-facing surface reports with `surface: 'silent'` so it is
   recorded/logged without a user toast.
 - Never call `toast.error()` directly from feature code; go through `errors.report()`.
 - User cancellation is not a failure. A deliberate cancel (e.g. closing the model-download dialog)

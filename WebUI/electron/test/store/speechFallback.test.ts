@@ -56,7 +56,6 @@ vi.mock('@/assets/js/permissions/permissions', () => ({
   requestDownload,
   notify,
   requestVramWarning: vi.fn(),
-  REMOTE_DOWNLOAD_GRANT: 'download:remote-turns',
   vramWarningGrantKey: (presetName: string) => `vram-warning:${presetName}`,
 }))
 

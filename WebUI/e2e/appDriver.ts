@@ -19,10 +19,6 @@ const AGENTIC_PRESET = 'Assistant'
  *  (see modes/base/presets/agent.json). "Game Agent" is the same agent, aimed. */
 const AGENT_PRESET = 'Agent'
 
-/** The preset the Home Agent runs its channel turns on (its own agentic preset,
- *  distinct from "Assistant"; see modes/base/presets/home-agent-chat.json). */
-const HOME_AGENT_PRESET = 'Home Agent'
-
 const FIXTURES_DIR = path.join(__dirname, 'fixtures')
 /** A real 768x512 PNG used as the input for edit / image-to-video / reference presets. */
 export const FIXTURE_IMAGE = path.join(FIXTURES_DIR, 'input.png')
@@ -107,7 +103,7 @@ export class AppDriver {
   }
 
   /**
-   * Install every backend (no Home Agent), then verify via the settings menu that
+   * Install every backend, then verify via the settings menu that
    * each is at its pinned version — updating any that are not. Idempotent: on a
    * machine where backends are already installed the wizard is skipped and only
    * the verification runs.
@@ -117,11 +113,8 @@ export class AppDriver {
       const startedOnWizard = await this.waitForWizardOrRunning()
 
       if (startedOnWizard) {
-        await test.step('Enable all backends in the Setup Wizard (no Home Agent)', async () => {
+        await test.step('Enable all backends in the Setup Wizard', async () => {
           await this.wizard.expectVisible()
-          // Home Agent is off by default on a fresh machine, but this also runs on
-          // one where a previous run installed it (which re-selects it on open).
-          await this.wizard.disableBackend('Home Agent')
           await this.wizard.enableAll(BACKENDS.map((b) => b.displayName))
         })
 
@@ -135,10 +128,6 @@ export class AppDriver {
       await test.step('Verify each backend is up to date, updating to the pinned version if not', async () => {
         await this.shell.openSetupWizard()
         await this.wizard.expectVisible()
-        // Re-opening the wizard reseeds install selection and re-enables any
-        // installed backend, so deactivate Home Agent again before continuing.
-        await this.wizard.disableBackend('Home Agent')
-
         for (const backend of BACKENDS.filter((b) => b.hasVersionAction)) {
           await test.step(`Check ${backend.displayName} version`, async () => {
             // Skip backends unavailable in the current product mode (e.g. OpenVINO
@@ -543,9 +532,6 @@ export class AppDriver {
     return test.step('Ensure the Text-to-Speech backend is installed', async () => {
       await this.shell.openSetupWizard()
       await this.wizard.expectVisible()
-      // Re-opening the wizard re-enables installed backends; keep Home Agent off so
-      // it doesn't divert to its setup page after install.
-      await this.wizard.disableBackend('Home Agent')
       // The speech sidecars are nested under Core Services and collapsed on open.
       await this.wizard.expandCoreServices()
 
@@ -557,29 +543,6 @@ export class AppDriver {
       await this.wizard.installAndContinue()
       await this.shell.expectRunning()
       await this.shell.ensureSettingsClosed()
-      return available
-    })
-  }
-
-  /**
-   * Ensure the Home Agent backend is installed and the app is running. Mirrors
-   * {@link ensureTtsBackendInstalled}: {@link installAllBackends} deliberately
-   * turns Home Agent OFF (it diverts to its own setup page after install), so the
-   * Home-Agent specs re-enable and install it explicitly. Returns false (app left
-   * running) when Home Agent isn't offered in this product mode so the caller can
-   * skip.
-   */
-  async ensureHomeAgentBackendInstalled(): Promise<boolean> {
-    return test.step('Ensure the Home Agent backend is installed', async () => {
-      await this.shell.openSetupWizard()
-      await this.wizard.expectVisible()
-      const available = await this.wizard.isAvailable('Home Agent')
-      if (available) await this.wizard.enable('Home Agent')
-      // "Install & Continue" when Home Agent is pending; else a no-op "Continue".
-      // Enabling Home Agent routes to its own setup page after install, so we do
-      // NOT assert the running shell here — the caller (HomeAgentPage) drives the
-      // setup screen next, whether we landed on it directly or on the shell.
-      await this.wizard.installAndContinue()
       return available
     })
   }
@@ -830,42 +793,6 @@ export class AppDriver {
         })
       }
       await this.settings.close('Chat')
-    })
-  }
-
-  /**
-   * Enforce the Home Agent's built-in tool selection so its channel turns can generate
-   * media (image, edit, image-to-video). Tool/workflow enablement is stored per-preset,
-   * so the "Home Agent" preset has to be active while we apply it — activate it, then
-   * reuse the same "all built-in tools + every workflow" defaults the full agentic flow
-   * uses. Best-effort: returns false (relying on the preset's own tool defaults, which
-   * enable tools + all workflows) when the "Home Agent" preset isn't offered in this
-   * product mode or the tools section isn't shown. Leaves the settings sidebar closed.
-   */
-  async enableHomeAgentMediaTools(): Promise<boolean> {
-    return test.step('Enable media generation for the Home Agent preset', async () => {
-      // Returning from the Setup Wizard (ensureHomeAgentBackendInstalled) can leave the
-      // App Settings sidebar open; it overlays the main view and would intercept the
-      // hover on the Chat mode button below. Close it first so selectPreset can reach it.
-      await this.shell.ensureSettingsClosed()
-      const active = await this.main.selectPreset('Chat', HOME_AGENT_PRESET)
-      if (!active) {
-        test.info().annotations.push({
-          type: 'home-agent-tools',
-          description: `"${HOME_AGENT_PRESET}" preset not offered here — relying on its built-in tool defaults`,
-        })
-        return false
-      }
-      await this.settings.open('Chat')
-      const applied = await this.tools.applyDefaultTools()
-      await this.settings.close('Chat')
-      if (!applied) {
-        test.info().annotations.push({
-          type: 'home-agent-tools',
-          description: 'tools section not shown for the Home Agent preset — relying on defaults',
-        })
-      }
-      return applied
     })
   }
 

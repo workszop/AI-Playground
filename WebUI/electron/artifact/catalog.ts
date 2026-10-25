@@ -2,7 +2,7 @@
  * Main-side preset catalog for the artifact runner
  * (docs/architecture-target.md §4.1, step 5).
  *
- * Renderer drivers (the panel, chat tools, Home Agent) ship a resolved preset
+ * Renderer drivers (the panel and chat tools) ship a resolved preset
  * entry with their run request, but the in-process agent direct tools construct
  * requests from workflow names at execution time — so main needs the same view
  * of the preset list the renderer has: the bundled base+mode files (with the
@@ -24,6 +24,7 @@ import {
   PresetSchema,
   applyVariant,
   getFirstVariantName,
+  isRemovedChatPresetName,
   type ChatPreset,
   type ComfyUiPreset,
   type Preset,
@@ -170,6 +171,7 @@ export function buildPresetCatalog(
       )
       continue
     }
+    if (preset.data.type === 'chat' && isRemovedChatPresetName(preset.data.name)) continue
     if (preset.data.type === 'comfy') catalog.comfy.set(preset.data.name, preset.data)
     else catalog.chat.set(preset.data.name, preset.data)
   }

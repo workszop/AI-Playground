@@ -658,6 +658,8 @@ export function guardUiMessageStream(
       const openText = new Set<string>()
       const heldToolInput = new Map<string, UIMessageChunk[]>()
       let checkingTool: string | undefined
+      let checkingToolError:
+        Extract<UIMessageChunk, { type: 'tool-input-error' | 'tool-output-error' }> | undefined
       let held: UIMessageChunk[] = []
       let piece = ''
       let shown = ''
@@ -724,6 +726,19 @@ export function guardUiMessageStream(
             heldToolInput.get(chunk.toolCallId)?.forEach(emit)
             heldToolInput.delete(chunk.toolCallId)
           }
+          if (chunk.type === 'tool-input-error' || chunk.type === 'tool-output-error') {
+            // Error text is rendered on the tool card just like a result.
+            const explainOnCard = () =>
+              controller.enqueue({
+                ...chunk,
+                errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
+              })
+            checkingTool = chunk.toolCallId
+            checkingToolError = chunk
+            if (!(await passes(chunk.errorText, explainOnCard))) return
+            checkingTool = undefined
+            checkingToolError = undefined
+          }
           if (chunk.type === 'tool-output-available') {
             const explainOnCard = () =>
               controller.enqueue({
@@ -732,8 +747,12 @@ export function guardUiMessageStream(
                 errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
               })
             checkingTool = chunk.toolCallId
+            checkingToolError = undefined
             if (!(await passes(toolOutputText(chunk.output), explainOnCard))) return
             checkingTool = undefined
+          }
+          if (chunk.type === 'error') {
+            if (!(await passes(chunk.errorText))) return
           }
           emit(chunk)
         }
@@ -747,11 +766,15 @@ export function guardUiMessageStream(
         // The caller's Stop: what was shown stays, the unjudged tail is dropped.
         for (const id of openText) controller.enqueue({ type: 'text-end', id })
         if (checkingTool !== undefined) {
-          controller.enqueue({
-            type: 'tool-output-error',
-            toolCallId: checkingTool,
-            errorText: KIDS_TOOL_OUTPUT_STOPPED_MESSAGE,
-          })
+          controller.enqueue(
+            checkingToolError
+              ? { ...checkingToolError, errorText: KIDS_TOOL_OUTPUT_STOPPED_MESSAGE }
+              : {
+                  type: 'tool-output-error',
+                  toolCallId: checkingTool,
+                  errorText: KIDS_TOOL_OUTPUT_STOPPED_MESSAGE,
+                },
+          )
         }
         controller.enqueue({ type: 'finish' })
         controller.close()

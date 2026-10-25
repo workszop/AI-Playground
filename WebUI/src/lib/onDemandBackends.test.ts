@@ -12,7 +12,6 @@ describe('isOnDemandBackend', () => {
     expect(isOnDemandBackend('llamacpp-backend')).toBe(false)
     expect(isOnDemandBackend('openvino-backend')).toBe(false)
     expect(isOnDemandBackend('comfyui-backend')).toBe(false)
-    expect(isOnDemandBackend('home-agent-backend')).toBe(false)
   })
 
   it('lists only the two dedicated audio sidecars', () => {

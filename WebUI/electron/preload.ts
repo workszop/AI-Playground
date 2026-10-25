@@ -3,7 +3,6 @@ import pkg from '../package.json'
 import type { LocalSettings } from './kernel/localSettings.ts'
 import { ModelPaths } from '@/assets/js/store/models'
 import { cloneForIpc } from '@/lib/cloneForIpc'
-import type { ChannelKind } from '@/assets/js/store/channels/types'
 import type { EmbedInquiry, IndexedDocument } from '@/types/rag'
 import type { PhisonKmIngestConfig, WarmupRequest } from '@/types/phisonKmRag'
 import type { AgentModeTurnConfig, AgentToolExecuteRequest, AgentToolSpec } from '@/types/agentIpc'
@@ -20,6 +19,7 @@ import type { SpeechSynthesisRequest } from '@/types/speechIpc'
 import type {
   PermissionGrant,
   PermissionGrantOrigin,
+  PermissionsPromptCancelPayload,
   PermissionsPromptPayload,
   PermissionsPromptResponse,
 } from '@/types/permissionsIpc'
@@ -234,6 +234,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     respond: (payload: PermissionsPromptResponse) => invoke('permissions:respond', payload),
     onPrompt: (callback: (payload: PermissionsPromptPayload) => void) =>
       onPush('permissions:prompt', callback),
+    onCancel: (callback: (payload: PermissionsPromptCancelPayload) => void) =>
+      onPush('permissions:cancel', callback),
   },
   chat: {
     submitTurn: (request: ChatTurnRequest) => invoke('chat:submitTurn', cloneForIpc(request)),
@@ -391,55 +393,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     captureWindow: (target: ScreenshotWindow) => invoke('screenshot:captureWindow', target),
     getPermissionStatus: () => invoke('screenshot:getPermissionStatus'),
     openPermissionSettings: () => send('screenshot:openPermissionSettings'),
-  },
-  homeAgent: {
-    // Persist an inbound document (base64) to disk for RAG ingestion.
-    saveDocument: (filename: string, base64: string) =>
-      invoke('saveHomeAgentDocument', filename, base64),
-    // Local web chat — URL discovery (the chat server lives in the Python
-    // backend; this only enumerates reachable addresses for the setup screen).
-    // `allowLan` mirrors the bind: loopback only unless LAN access is on.
-    localWeb: {
-      getUrls: (port: number, allowLan: boolean): Promise<string[]> =>
-        invoke('homeAgent:localWeb:getUrls', port, allowLan),
-    },
-    // Channel-agnostic dispatcher. Every method is keyed by ChannelKind
-    // (`'telegram'` | `'slack'` | `'discord'` | `'local-web'`) so adding a new
-    // platform requires zero edits here — only a new entry in the renderer-side
-    // channel registry and a Python channel module.
-    channel: {
-      saveConfig: (kind: ChannelKind, config: Record<string, string>) =>
-        invoke('channel:saveConfig', kind, config),
-      loadConfig: (kind: ChannelKind) => invoke('channel:loadConfig', kind),
-      clearConfig: (kind: ChannelKind) => invoke('channel:clearConfig', kind),
-      savePrefs: (kind: ChannelKind, prefs: { verified?: boolean; enabled?: boolean }) =>
-        invoke('channel:savePrefs', kind, prefs),
-      loadPrefs: (kind: ChannelKind) => invoke('channel:loadPrefs', kind),
-      test: (kind: ChannelKind) => invoke('channel:test', kind),
-      inject: (kind: ChannelKind, config: Record<string, string | undefined>) =>
-        invoke('channel:inject', kind, config),
-      detectIdentity: (kind: ChannelKind, config: Record<string, string | undefined>) =>
-        invoke('channel:detectIdentity', kind, config),
-      detectIdentityFromSaved: (kind: ChannelKind) =>
-        invoke('channel:detectIdentityFromSaved', kind),
-      poll: (kind: ChannelKind) => invoke('channel:poll', kind),
-      flushPending: (kind: ChannelKind) => invoke('channel:flushPending', kind),
-      send: (
-        kind: ChannelKind,
-        action:
-          | 'reply'
-          | 'update'
-          | 'photo'
-          | 'video'
-          | 'voice'
-          | 'document'
-          | 'typing'
-          | 'keyboard'
-          | 'editMessage'
-          | 'history',
-        payload: Record<string, unknown>,
-      ) => invoke('channel:send', kind, action, payload),
-    },
   },
   // Cloud Mode provider secrets, encrypted at rest via safeStorage in main.
   cloudProvider: {

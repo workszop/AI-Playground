@@ -44,8 +44,8 @@ export type TranscriptionEndpoint = {
  * ask the user to click again": the click that opened the dialog is spent, and
  * silently starting a recording when the download finishes captures whatever
  * happens to be said next — which then gets transcribed as gibberish. Callers
- * that only transcribe already-captured audio (the transcribeAudio tool, the
- * Home Agent voice pipeline) can ignore it and proceed.
+ * that only transcribe already-captured audio (the transcribeAudio tool) can
+ * ignore it and proceed.
  */
 export type SttReadyResult = { downloadPrompted: boolean }
 
@@ -82,9 +82,9 @@ export const useSpeechToText = defineStore(
     const productMode = useProductMode()
 
     /**
-     * App-wide fallback transcription endpoint. Shared by both the Home Agent
-     * voice-message pipeline and the regular mic-STT path so transcription
-     * works even without OVMS installed.
+     * App-wide fallback transcription endpoint. Shared by the regular mic-STT
+     * path and the transcribeAudio tool so transcription works even without
+     * OVMS installed.
      */
     const fallback = ref<SttFallbackConfig>({
       enabled: false,
@@ -256,30 +256,6 @@ export const useSpeechToText = defineStore(
       }
     }
 
-    /**
-     * Dialog-free variant of {@link ensureStandaloneReady} for unattended paths
-     * (the Home Agent's remote voice notes): start the sidecar if it is installed
-     * and its model is already on disk, and otherwise do nothing. Never prompts —
-     * a remote sender cannot answer a download popup on the host.
-     */
-    async function ensureStandaloneServerRunning(): Promise<void> {
-      const svc = backendServices.info.find((s) => s.serviceName === 'whisper-backend')
-      if (!svc?.isSetUp) return
-      try {
-        const modelExists = await models.checkTranscriptionModelExists(
-          selectedStandaloneModel.value,
-        )
-        if (!modelExists) return
-        // Re-read after the await, for the same reason as in ensureStandaloneReady.
-        const current = backendServices.info.find((s) => s.serviceName === 'whisper-backend') ?? svc
-        if (current.status !== 'running') {
-          await backendServices.startService('whisper-backend')
-        }
-      } catch (error) {
-        console.error('Failed to ensure the standalone Whisper sidecar is running:', error)
-      }
-    }
-
     /** OpenAI-compatible endpoint for the standalone Whisper sidecar, or null when
      *  its backend isn't running yet. The loopback token is passed as the apiKey so
      *  the shared transcribe helper's `Authorization: Bearer` satisfies the sidecar. */
@@ -367,7 +343,7 @@ export const useSpeechToText = defineStore(
       const engine = effectiveSttEngine.value
       // Standalone only when the sidecar can actually serve: installed-without-
       // its-model would otherwise return the sidecar URL and skip a configured
-      // external fallback (Home Agent's dialog-free path never prompts a download).
+      // external fallback.
       if (engine === 'standalone') {
         const endpoint = await resolveStandaloneEndpointIfReady()
         if (endpoint) return endpoint
@@ -595,7 +571,6 @@ export const useSpeechToText = defineStore(
       hasFallback,
       resolveTranscription,
       ensureStandaloneReady,
-      ensureStandaloneServerRunning,
       toggle,
       resetToDefaults,
       initialize,

@@ -77,8 +77,7 @@ if (initialPage !== null) {
 // over this bridge. Download consent goes through the permissions adapter.
 startMediaRequestBridge()
 // Chat tools run in main and ask this side by name for the few things that are
-// genuinely the window's: the speech engine (and its download prompt),
-// Chromium's audio decoder, and the Home Agent confirmation card.
+// genuinely the window's: the speech engine and Chromium's audio decoder.
 startChatAskBridge()
 startPermissionsAdapter()
 

@@ -19,6 +19,7 @@ import {
   KIDS_GUARD_SMALL_MODEL_DIR,
   KIDS_GUARD_SMALL_MODEL_FILE,
   KIDS_GUARD_SMALL_MODEL_REPO,
+  KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
   buildGuardPrompt,
   checkKidsPrompt,
   checkKidsResponse,
@@ -32,6 +33,7 @@ import {
   parseGuardVerdict,
   replyPieceReady,
   setKidsGuardDeps,
+  toolOutputText,
   type KidsGuardDeps,
 } from '../../safety/kidsGuard'
 
@@ -143,6 +145,20 @@ describe('helpers', () => {
     const windows = guardWindows(text)
     expect(windows.length).toBe(5)
     expect(windows.join('')).toBe(text)
+  })
+
+  it('collects the text of a tool output and skips image payloads', () => {
+    expect(
+      toolOutputText({
+        success: true,
+        message: 'Gotowe',
+        images: [{ url: 'aipg-media://x.png', data: 'data:image/png;base64,AAAA' }],
+        pages: ['Pierwsza', { body: 'Druga' }],
+        count: 3,
+      }),
+    ).toBe('Gotowe\nPierwsza\nDruga')
+    expect(toolOutputText('tekst')).toBe('tekst')
+    expect(toolOutputText(null)).toBe('')
   })
 
   it('reads the newest user message text', () => {
@@ -621,14 +637,14 @@ describe('guard placement fallback', () => {
     expect(startedPlacements(deps)).toEqual([GPU_4B])
   })
 
-  it('does not fall back once the caller has cancelled the check', async () => {
+  it("rethrows the caller's cancellation instead of blocking or falling back", async () => {
     const controller = new AbortController()
     const deps = wire({ chat: [GPU_4B, CPU_4B], media: [] })
     fetchMock.mockImplementation(async () => {
       controller.abort()
       throw new DOMException('aborted', 'AbortError')
     })
-    expect((await checkKidsPrompt('kot', controller.signal)).level).toBe('unavailable')
+    await expect(checkKidsPrompt('kot', controller.signal)).rejects.toThrow('aborted')
     expect(startedPlacements(deps)).toEqual([GPU_4B])
   })
 
@@ -815,6 +831,101 @@ describe('guardUiMessageStream', () => {
       })(),
     ).rejects.toThrow('model crashed')
     expect(check).toHaveBeenCalledWith('Krótko')
+  })
+
+  it("ends with the check's error, not a blocked message, when the check is cancelled", async () => {
+    const check = vi.fn(async () => {
+      throw new DOMException('aborted', 'AbortError')
+    })
+    const onBlocked = vi.fn()
+    const source = controllableSource()
+    const reader = guardUiMessageStream(source.stream, check, onBlocked).getReader()
+    source.push({ type: 'start', messageId: 'm1' })
+    source.push({ type: 'text-start', id: 't' })
+    source.push({ type: 'text-delta', id: 't', delta: 'Dawno temu był smok.' })
+    source.push({ type: 'text-end', id: 't' })
+    const types: string[] = []
+    await expect(
+      (async () => {
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) return
+          types.push(value.type)
+        }
+      })(),
+    ).rejects.toThrow('aborted')
+    expect(types).toEqual(['start'])
+    expect(onBlocked).not.toHaveBeenCalled()
+    expect(source.cancelled).toHaveBeenCalled()
+  })
+
+  it('judges a tool output before showing it', async () => {
+    const check = vi.fn(async () => ({ level: 'safe' as const }))
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'tool-input-available', toolCallId: 'c1', toolName: 'web', input: {} },
+          {
+            type: 'tool-output-available',
+            toolCallId: 'c1',
+            output: { text: 'Strona o smokach.' },
+          },
+          { type: 'finish' },
+        ]),
+        check,
+      ),
+    )
+    expect(check).toHaveBeenCalledWith('Strona o smokach.')
+    expect(out.map((c) => c.type)).toEqual([
+      'start',
+      'tool-input-available',
+      'tool-output-available',
+      'finish',
+    ])
+  })
+
+  it('never shows a blocked tool output and appends the blocked message', async () => {
+    const check = vi.fn(async () => ({ level: 'unsafe' as const }))
+    const onBlocked = vi.fn()
+    const out = await collect(
+      guardUiMessageStream(
+        streamOf([
+          { type: 'start', messageId: 'm1' },
+          { type: 'tool-input-available', toolCallId: 'c1', toolName: 'web', input: {} },
+          { type: 'tool-output-available', toolCallId: 'c1', output: 'Zła treść ze strony.' },
+          { type: 'text-start', id: 't' },
+          { type: 'text-delta', id: 't', delta: 'Nie pokazuj.' },
+          { type: 'text-end', id: 't' },
+          { type: 'finish' },
+        ]),
+        check,
+        onBlocked,
+      ),
+    )
+    expect(out.map((c) => c.type)).toEqual([
+      'start',
+      'tool-input-available',
+      'tool-output-error',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish',
+    ])
+    expect(out[2]).toEqual({
+      type: 'tool-output-error',
+      toolCallId: 'c1',
+      errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
+    })
+    expect(onBlocked).toHaveBeenCalledTimes(1)
+    const message = await assemble(out)
+    expect(message?.parts.filter((p) => p.type === 'text')).toEqual([
+      expect.objectContaining({ text: KIDS_BLOCKED_MESSAGE }),
+    ])
+    expect(message?.parts.find((p) => p.type.startsWith('tool-'))).toMatchObject({
+      state: 'output-error',
+      errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
+    })
   })
 
   it('passes the start chunk through before anything is judged', async () => {

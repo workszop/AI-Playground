@@ -43,6 +43,11 @@ export const KIDS_BLOCKED_MESSAGE =
   'Nie mogę w tym pomóc. Zapytaj o coś innego.\n\n' +
   "I can't help with that. Try asking about something else."
 
+/** Shown on a tool card whose result the guard blocked, so the card is not left blank. */
+export const KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE =
+  'Wynik tego narzędzia został ukryty ze względów bezpieczeństwa.\n\n' +
+  'This tool result was hidden for safety reasons.'
+
 /** Agent turns stream outside the chat guard, so the kids-safe build keeps them off. */
 export const KIDS_SAFE_AGENT_MODE_DISABLED = true
 
@@ -495,6 +500,8 @@ async function judge(
       appLogger.info(`Kids guard blocked text (${verdict.level})`, 'kids-guard')
     return verdict
   } catch (error) {
+    // The caller's own Stop is not a guard failure: let it end the turn instead of blocking it.
+    if (signal?.aborted) throw error
     const detail = errorDetail(error)
     appLogger.warn(`Kids guard unavailable, blocking: ${detail}`, 'kids-guard')
     return { level: 'unavailable', detail }
@@ -538,6 +545,25 @@ export async function checkKidsResponse(
   )
 }
 
+const SKIPPED_TOOL_OUTPUT_PREFIXES = ['data:', 'aipg-media://']
+
+/** The text a tool output would show on screen: every string in it except media references. */
+export function toolOutputText(output: unknown): string {
+  const texts: string[] = []
+  const visit = (value: unknown) => {
+    if (typeof value === 'string') {
+      if (!SKIPPED_TOOL_OUTPUT_PREFIXES.some((prefix) => value.startsWith(prefix)))
+        texts.push(value)
+    } else if (Array.isArray(value)) {
+      value.forEach(visit)
+    } else if (typeof value === 'object' && value !== null) {
+      Object.values(value).forEach(visit)
+    }
+  }
+  visit(output)
+  return texts.join('\n')
+}
+
 /** The chunks of an assistant message that only says `text`. */
 export function textOnlyChunks(text: string): UIMessageChunk[] {
   return [
@@ -561,7 +587,9 @@ export function replyPieceReady(piece: string, firstPiece: boolean): boolean {
  * is already on screen, and only then shown. The model keeps streaming while a
  * piece is judged. A blocked piece is never shown: the open text is closed, the
  * blocked message is appended, the source is cancelled and `onBlocked` fires so
- * the caller can stop generation. Reasoning is dropped, since it is not judged.
+ * the caller can stop generation. Tool outputs are judged the same way before
+ * they are shown. Reasoning is dropped, since it is not judged. A check that
+ * throws (the caller's Stop) ends the stream with that error, not a block.
  */
 export function guardUiMessageStream(
   stream: ReadableStream<UIMessageChunk>,
@@ -612,21 +640,22 @@ export function guardUiMessageStream(
         if (chunk.type === 'text-end') openText.delete(chunk.id)
         controller.enqueue(chunk)
       }
-      // Resolves false when the piece was blocked and the stream is finished.
+      // Resolves false when `text` was blocked and the stream is finished.
+      const passes = async (text: string, onBlock?: () => void): Promise<boolean> => {
+        if (!text.trim()) return true
+        const verdict = await check(text)
+        if (!isBlocked(verdict)) return true
+        onBlock?.()
+        for (const id of openText) controller.enqueue({ type: 'text-end', id })
+        for (const chunk of textOnlyChunks(blockedMessageFor(verdict))) controller.enqueue(chunk)
+        controller.enqueue({ type: 'finish' })
+        controller.close()
+        onBlocked?.()
+        await reader.cancel().catch(() => {})
+        return false
+      }
       const settlePiece = async (): Promise<boolean> => {
-        if (piece.trim()) {
-          const verdict = await check(shown.slice(-REPLY_OVERLAP_CHARS) + piece)
-          if (isBlocked(verdict)) {
-            for (const id of openText) controller.enqueue({ type: 'text-end', id })
-            for (const chunk of textOnlyChunks(blockedMessageFor(verdict)))
-              controller.enqueue(chunk)
-            controller.enqueue({ type: 'finish' })
-            controller.close()
-            onBlocked?.()
-            await reader.cancel().catch(() => {})
-            return false
-          }
-        }
+        if (piece.trim() && !(await passes(shown.slice(-REPLY_OVERLAP_CHARS) + piece))) return false
         held.forEach(emit)
         held = []
         shown += piece
@@ -634,29 +663,44 @@ export function guardUiMessageStream(
         return true
       }
 
-      for (;;) {
-        const chunk = await nextChunk()
-        if (!chunk) break
-        if (chunk.type === 'start') {
+      try {
+        for (;;) {
+          const chunk = await nextChunk()
+          if (!chunk) break
+          if (chunk.type === 'start') {
+            emit(chunk)
+            continue
+          }
+          if (chunk.type.startsWith('reasoning-')) continue
+          if (chunk.type === 'text-delta') {
+            piece += chunk.delta
+            held.push(chunk)
+            if (replyPieceReady(piece, !shown) && !(await settlePiece())) return
+            continue
+          }
+          if (chunk.type === 'text-start') {
+            held.push(chunk)
+            continue
+          }
+          // Anything else (text end, tool activity, step and finish markers) closes the piece.
+          if (!(await settlePiece())) return
+          if (chunk.type === 'tool-output-available') {
+            const explainOnCard = () =>
+              controller.enqueue({
+                type: 'tool-output-error',
+                toolCallId: chunk.toolCallId,
+                errorText: KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE,
+              })
+            if (!(await passes(toolOutputText(chunk.output), explainOnCard))) return
+          }
           emit(chunk)
-          continue
         }
-        if (chunk.type.startsWith('reasoning-')) continue
-        if (chunk.type === 'text-delta') {
-          piece += chunk.delta
-          held.push(chunk)
-          if (replyPieceReady(piece, !shown) && !(await settlePiece())) return
-          continue
-        }
-        if (chunk.type === 'text-start') {
-          held.push(chunk)
-          continue
-        }
-        // Anything else (text end, tool activity, step and finish markers) closes the piece.
         if (!(await settlePiece())) return
-        emit(chunk)
+      } catch (error) {
+        await reader.cancel().catch(() => {})
+        controller.error(error)
+        return
       }
-      if (!(await settlePiece())) return
       if (sourceError !== undefined) controller.error(sourceError)
       else controller.close()
     },

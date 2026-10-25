@@ -8,6 +8,7 @@ Ten fork [intel/AI-Playground](https://github.com/intel/AI-Playground) dodaje fi
 | --- | --- |
 | Wiadomość wpisana przez użytkownika na czacie | Lista słów (polskich i angielskich), a potem ocena promptu przez Qwen3Guard-Gen-4B, zanim uruchomi się jakikolwiek model |
 | Odpowiedź czatu | Pokazywana kawałkami. Każdy kawałek ocenia Qwen3Guard (razem z pytaniem i końcówką już pokazanego tekstu), zanim się wyświetli. Zablokowany kawałek nigdy się nie pojawia: odpowiedź się urywa i dochodzi komunikat o blokadzie. Tekst rozumowania modelu („thinking”) nigdy się nie wyświetla |
+| Wynik narzędzia w czacie (MCP, przeglądarka, narzędzia multimedialne) | Tekst wyniku ocenia Qwen3Guard tak jak odpowiedź, zanim się wyświetli. Zablokowany wynik nigdy się nie pojawia: na karcie narzędzia zostaje komunikat „Wynik tego narzędzia został ukryty ze względów bezpieczeństwa”, odpowiedź się urywa i dochodzi komunikat o blokadzie |
 | Prompt obrazu (panel obrazów i narzędzie obrazów w czacie) | To samo sprawdzenie promptu, zanim ruszy ComfyUI |
 | Wygenerowany obraz | Węzeł `SafetyChecker` (vit-base-nsfw-detector) na każdym obrazie z serii, z progiem zablokowanym na 0,4 (czułość 0,6). Obejmuje też warianty OpenVINO, Colorize, Change Face i Upscale |
 | Nienaruszalność filtra obrazów | Przed każdym generowaniem obrazu aplikacja sprawdza workflow, który ma wysłać: każdy zapisywany obraz musi wychodzić prosto z węzła `SafetyChecker` z progiem 0,4 lub niższym, inaczej generowanie zostaje odrzucone. Obraz z każdego innego węzła nigdy się nie wyświetla (animacje są dozwolone tylko w presetach wideo, których nic nie filtruje). Pliki węzła `SafetyChecker` są porównywane z kopią wbudowaną w aplikację i przywracane (z ponownym uruchomieniem ComfyUI), jeśli ktoś je zmienił |
@@ -16,7 +17,7 @@ Ten fork [intel/AI-Playground](https://github.com/intel/AI-Playground) dodaje fi
 
 Kontrola nienaruszalności odrzuca dwa rodzaje presetów, które zapisują obrazy bez węzła `SafetyChecker` przed zapisem: partnerski preset Acer VisionArt (zapisuje obraz własnym węzłem Acera) i presety „Dummy Image” oraz „Dummy Edit”, dostępne tylko w trybie deweloperskim.
 
-Na zablokowaną prośbę aplikacja odpowiada: „Nie mogę w tym pomóc. Zapytaj o coś innego. / I can't help with that. Try asking about something else.” Blokują oba werdykty modelu: „Unsafe” i „Controversial”.
+Na zablokowaną prośbę aplikacja odpowiada: „Nie mogę w tym pomóc. Zapytaj o coś innego. / I can't help with that. Try asking about something else.” Blokują oba werdykty modelu: „Unsafe” i „Controversial”. Zatrzymanie odpowiedzi przyciskiem Stop w trakcie sprawdzania nie jest blokadą: odpowiedź po prostu się kończy, bez komunikatu.
 
 ## Wymagania
 

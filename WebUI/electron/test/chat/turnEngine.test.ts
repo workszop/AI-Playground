@@ -1436,6 +1436,60 @@ describe('turn engine', () => {
     expect(assistantText).not.toContain('Zła treść')
   })
 
+  it('kids guard: a stop during the prompt check ends the turn cleanly', async () => {
+    const guard = await import('../../safety/kidsGuard')
+    let turnId = ''
+    vi.mocked(guard.checkKidsPrompt).mockImplementationOnce(async () => {
+      cancelChatTurn('conv-1', turnId)
+      throw new DOMException('This operation was aborted', 'AbortError')
+    })
+    queueFetchMock(sse(textChunks('must not be requested')))
+    const submitted = submitChatTurn(
+      turnRequest({ persist: { meta: null, ragHashes: [], lastMainKey: 'conv-1' } }),
+    )
+    turnId = submitted.turnId
+    await waitForTurnDone(turnId)
+
+    expect(requests).toHaveLength(0)
+    expect(chatChunks().some((c) => c.type === 'text-delta')).toBe(false)
+    expect(chatChunks().some((c) => c.type === 'error')).toBe(false)
+    expect(chatTurnActive('conv-1')).toBe(false)
+    const saved = saveChatTurnConversation.mock.calls.at(-1)?.[0] as unknown as {
+      messages: Array<{ role: string }>
+    }
+    expect(saved.messages.at(-1)?.role).toBe('user')
+  })
+
+  it('kids guard: a stop during a reply check ends the turn without a blocked message', async () => {
+    const guard = await import('../../safety/kidsGuard')
+    let turnId = ''
+    vi.mocked(guard.checkKidsResponse).mockImplementationOnce(async () => {
+      cancelChatTurn('conv-1', turnId)
+      throw new DOMException('This operation was aborted', 'AbortError')
+    })
+    queueFetchMock(sse(textChunks('Dawno temu był smok.')))
+    const submitted = submitChatTurn(
+      turnRequest({ persist: { meta: null, ragHashes: [], lastMainKey: 'conv-1' } }),
+    )
+    turnId = submitted.turnId
+    await waitForTurnDone(turnId)
+
+    const shown = chatChunks()
+      .flatMap((c) => (c.type === 'text-delta' ? [c.delta] : []))
+      .join('')
+    expect(shown).toBe('')
+    expect(chatChunks().some((c) => c.type === 'error')).toBe(false)
+    expect(chatTurnActive('conv-1')).toBe(false)
+    const saved = saveChatTurnConversation.mock.calls.at(-1)?.[0] as unknown as {
+      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>
+    }
+    const assistantText = saved.messages
+      .filter((m) => m.role === 'assistant')
+      .flatMap((m) => m.parts.flatMap((p) => (p.type === 'text' ? [p.text] : [])))
+      .join('')
+    expect(assistantText).not.toContain('not available')
+  })
+
   it('kids guard: answers a blocked prompt without calling the model', async () => {
     const guard = await import('../../safety/kidsGuard')
     vi.mocked(guard.checkKidsPrompt).mockResolvedValueOnce({ level: 'unsafe' })

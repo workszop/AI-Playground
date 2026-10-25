@@ -153,7 +153,8 @@ describe('helpers', () => {
         success: true,
         message: 'Gotowe',
         images: [{ url: 'aipg-media://x.png', data: 'data:image/png;base64,AAAA' }],
-        pages: ['Pierwsza', { body: 'Druga' }],
+        links: [{ href: 'https://example.com/a?b=c', text: 'Pierwsza' }],
+        pages: [{ body: 'Druga', url: 'http://example.org' }],
         count: 3,
       }),
     ).toBe('Gotowe\nPierwsza\nDruga')
@@ -844,28 +845,31 @@ describe('guardUiMessageStream', () => {
     expect(check).toHaveBeenCalledWith('Krótko')
   })
 
-  it("ends with the check's error, not a blocked message, when the check is cancelled", async () => {
-    const check = vi.fn(async () => {
-      throw new DOMException('aborted', 'AbortError')
-    })
+  it('ends cleanly with what was already shown when the check is cancelled', async () => {
+    const check = vi
+      .fn()
+      .mockResolvedValueOnce({ level: 'safe' })
+      .mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
     const onBlocked = vi.fn()
     const source = controllableSource()
-    const reader = guardUiMessageStream(source.stream, check, onBlocked).getReader()
+    const out = collect(guardUiMessageStream(source.stream, check, onBlocked))
     source.push({ type: 'start', messageId: 'm1' })
     source.push({ type: 'text-start', id: 't' })
-    source.push({ type: 'text-delta', id: 't', delta: 'Dawno temu był smok.' })
+    source.push({ type: 'text-delta', id: 't', delta: paragraph(6) })
+    source.push({ type: 'text-delta', id: 't', delta: 'Drugi kawałek.' })
     source.push({ type: 'text-end', id: 't' })
-    const types: string[] = []
-    await expect(
-      (async () => {
-        for (;;) {
-          const { value, done } = await reader.read()
-          if (done) return
-          types.push(value.type)
-        }
-      })(),
-    ).rejects.toThrow('aborted')
-    expect(types).toEqual(['start'])
+    const chunks = await out
+    expect(chunks.map((c) => c.type)).toEqual([
+      'start',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish',
+    ])
+    const message = await assemble(chunks)
+    const text = message?.parts.flatMap((p) => (p.type === 'text' ? [p.text] : [])).join('')
+    expect(text).toContain('Smok leciał')
+    expect(text).not.toContain('Drugi')
     expect(onBlocked).not.toHaveBeenCalled()
     expect(source.cancelled).toHaveBeenCalled()
   })

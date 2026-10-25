@@ -52,6 +52,7 @@ import {
   type OrchestratorDeps,
 } from '../../kernel/orchestrator'
 import type { ArtifactRunPayload } from '../../artifact/runner'
+import { appLoggerInstance } from '../../observability/logger'
 import { blockedMessageFor } from '../../safety/kidsGuard'
 
 type Deferred = {
@@ -532,9 +533,12 @@ describe('the orchestrator', () => {
     const d = deps({
       checkPrompt: vi.fn(
         (_prompt: string, signal?: AbortSignal) =>
-          new Promise<{ blocked: boolean }>((resolve) => {
+          new Promise<{ blocked: boolean }>((_resolve, reject) => {
             seen = signal
-            signal?.addEventListener('abort', () => resolve({ blocked: true }))
+            // The guard rethrows the caller's cancellation.
+            signal?.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError')),
+            )
           }),
       ),
     })
@@ -544,6 +548,10 @@ describe('the orchestrator', () => {
     cancelArtifactRun('run-1')
     expect(seen?.aborted).toBe(true)
     expect((await run).state).toBe('cancelled')
+    expect(appLoggerInstance.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('blocking'),
+      'kids-guard',
+    )
     expect(d.stopChatForMedia).not.toHaveBeenCalled()
     expect(startArtifactRunMock).not.toHaveBeenCalled()
   })

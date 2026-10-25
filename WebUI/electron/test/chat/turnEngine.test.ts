@@ -1463,11 +1463,20 @@ describe('turn engine', () => {
   it('kids guard: a stop during a reply check ends the turn without a blocked message', async () => {
     const guard = await import('../../safety/kidsGuard')
     let turnId = ''
-    vi.mocked(guard.checkKidsResponse).mockImplementationOnce(async () => {
-      cancelChatTurn('conv-1', turnId)
-      throw new DOMException('This operation was aborted', 'AbortError')
-    })
-    queueFetchMock(sse(textChunks('Dawno temu był smok.')))
+    vi.mocked(guard.checkKidsResponse)
+      .mockResolvedValueOnce({ level: 'safe' })
+      .mockImplementationOnce(async () => {
+        cancelChatTurn('conv-1', turnId)
+        throw new DOMException('This operation was aborted', 'AbortError')
+      })
+    const first = `${'Smok leciał nad górami i lasami. '.repeat(6)}\n\n`
+    queueFetchMock(
+      sse([
+        ...textChunks(first).slice(0, 1),
+        ...textChunks('Drugi kawałek.').slice(0, 1),
+        ...textChunks('').slice(1),
+      ]),
+    )
     const submitted = submitChatTurn(
       turnRequest({ persist: { meta: null, ragHashes: [], lastMainKey: 'conv-1' } }),
     )
@@ -1477,7 +1486,8 @@ describe('turn engine', () => {
     const shown = chatChunks()
       .flatMap((c) => (c.type === 'text-delta' ? [c.delta] : []))
       .join('')
-    expect(shown).toBe('')
+    expect(shown).toContain('Smok leciał')
+    expect(shown).not.toContain('Drugi')
     expect(chatChunks().some((c) => c.type === 'error')).toBe(false)
     expect(chatTurnActive('conv-1')).toBe(false)
     const saved = saveChatTurnConversation.mock.calls.at(-1)?.[0] as unknown as {
@@ -1487,6 +1497,8 @@ describe('turn engine', () => {
       .filter((m) => m.role === 'assistant')
       .flatMap((m) => m.parts.flatMap((p) => (p.type === 'text' ? [p.text] : [])))
       .join('')
+    expect(assistantText).toContain('Smok leciał')
+    expect(assistantText).not.toContain('Drugi')
     expect(assistantText).not.toContain('not available')
   })
 

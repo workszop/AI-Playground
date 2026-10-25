@@ -89,6 +89,15 @@ describe('imageFilterProblem', () => {
     expect(imageFilterProblem(wf, 'image')).toMatch(/no image output/)
   })
 
+  it('leaves a video preset whose output node takes images alone', () => {
+    const video = {
+      '1': { class_type: 'VAEDecode', inputs: {} },
+      '2': { class_type: 'VHS_VideoCombine', inputs: { images: ['1', 0] } },
+    } as unknown as ComfyUIApiWorkflow
+    expect(imageFilterProblem(video, 'video')).toBeNull()
+    expect(imageFilterProblem(video, 'image')).toMatch(/VHS_VideoCombine node 2 is not fed/)
+  })
+
   it('leaves video workflows alone', () => {
     const video = {
       '1': { class_type: 'VAEDecode', inputs: {} },

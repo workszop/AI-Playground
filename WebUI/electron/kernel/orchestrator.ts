@@ -267,7 +267,8 @@ async function checkRunPrompt(
     // Unwired, nothing is marked checked and the runner refuses the run.
     verdict = await (orchestratorDeps?.checkPrompt(payload.params.prompt, cancel.signal) ?? null)
   } catch (error) {
-    appLogger.warn(`Image prompt check failed, blocking: ${String(error)}`, 'kids-guard')
+    if (!cancel.signal.aborted)
+      appLogger.warn(`Image prompt check failed, blocking: ${String(error)}`, 'kids-guard')
     verdict = { blocked: true }
   } finally {
     checkCancels.delete(payload.runId)

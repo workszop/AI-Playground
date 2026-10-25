@@ -71,10 +71,12 @@ export function checkedImageOutputs(workflow: ComfyUIApiWorkflow): Set<string> {
 }
 
 /**
- * Ids of the nodes that take `images` and feed nothing else: savers and
- * previews of any class, since ComfyUI writes what they receive to disk.
+ * Ids of the nodes that write images to disk: every `*SaveImage*`, and in a
+ * still-image workflow every node that takes `images` and feeds nothing else
+ * (savers and previews of any class). Video presets are unfiltered by design,
+ * and their output node takes the frames as `images`.
  */
-function imageSinks(workflow: ComfyUIApiWorkflow): Set<string> {
+function imageSinks(workflow: ComfyUIApiWorkflow, mediaType: string | undefined): Set<string> {
   const consumed = new Set<string>()
   for (const node of Object.values(workflow) as WorkflowNode[]) {
     for (const value of Object.values(node.inputs ?? {})) {
@@ -84,7 +86,8 @@ function imageSinks(workflow: ComfyUIApiWorkflow): Set<string> {
   const sinks = new Set<string>()
   for (const [id, node] of Object.entries(workflow) as [string, WorkflowNode][]) {
     const saver = typeof node.class_type === 'string' && node.class_type.includes('SaveImage')
-    if (saver || (isLink(node.inputs?.images) && !consumed.has(id))) sinks.add(id)
+    const terminalImages = mediaType !== 'video' && isLink(node.inputs?.images) && !consumed.has(id)
+    if (saver || terminalImages) sinks.add(id)
   }
   return sinks
 }
@@ -101,7 +104,7 @@ export function imageFilterProblem(
     }
   }
   const checked = checkedImageOutputs(workflow)
-  for (const id of imageSinks(workflow)) {
+  for (const id of imageSinks(workflow, mediaType)) {
     if (!checked.has(id))
       return `${String(workflow[id]?.class_type)} node ${id} is not fed by a SafetyChecker`
   }

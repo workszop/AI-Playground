@@ -552,9 +552,14 @@ export async function checkKidsResponse(
   )
 }
 
-const SKIPPED_TOOL_OUTPUT_PREFIXES = ['data:', 'aipg-media://']
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
 
-/** The text a tool output would show on screen: every string in it except media references. */
+// Media payloads and links: shown on the card, but not text the guard can judge.
+const SKIPPED_TOOL_OUTPUT_PREFIXES = ['data:', 'aipg-media://', 'http://', 'https://']
+
+/** The text a tool output would show on screen: every string in it except media payloads and URLs. */
 export function toolOutputText(output: unknown): string {
   const texts: string[] = []
   const visit = (value: unknown) => {
@@ -595,8 +600,9 @@ export function replyPieceReady(piece: string, firstPiece: boolean): boolean {
  * piece is judged. A blocked piece is never shown: the open text is closed, the
  * blocked message is appended, the source is cancelled and `onBlocked` fires so
  * the caller can stop generation. Tool outputs are judged the same way before
- * they are shown. Reasoning is dropped, since it is not judged. A check that
- * throws (the caller's Stop) ends the stream with that error, not a block.
+ * they are shown. Reasoning is dropped, since it is not judged. A cancelled
+ * check (the caller's Stop) ends the stream cleanly with what was shown; any
+ * other check error ends it with that error.
  */
 export function guardUiMessageStream(
   stream: ReadableStream<UIMessageChunk>,
@@ -705,7 +711,14 @@ export function guardUiMessageStream(
         if (!(await settlePiece())) return
       } catch (error) {
         await reader.cancel().catch(() => {})
-        controller.error(error)
+        if (!isAbortError(error)) {
+          controller.error(error)
+          return
+        }
+        // The caller's Stop: what was shown stays, the unjudged tail is dropped.
+        for (const id of openText) controller.enqueue({ type: 'text-end', id })
+        controller.enqueue({ type: 'finish' })
+        controller.close()
         return
       }
       if (sourceError !== undefined) controller.error(sourceError)

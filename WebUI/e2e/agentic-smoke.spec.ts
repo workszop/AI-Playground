@@ -22,6 +22,15 @@ const CHAT_BACKENDS = [
   { label: 'OpenVINO', name: 'OpenVINO', optional: true },
 ] as const
 
+// E2E_SMALL_MODELS=1 is for a laptop iGPU, where the 9B reasoning model runs at ~2 tok/s
+// and a turn outlasts TEXT_TIMEOUT. The text turn runs on the dev-only 350M model; the
+// image turn goes through Image Gen with the instant dummy workflow instead, because a
+// 350M model drops the media → specialist → comfyUI tool chain at one hop or another
+// (seen both ways). That model is GGUF-only, so the OpenVINO variant skips.
+const SMALL_MODELS = !!process.env.E2E_SMALL_MODELS
+const SMALL_CHAT_MODEL = 'LFM2.5-350M-Q4_K_M.gguf'
+const SMALL_IMAGE_PRESET = 'Dummy Image (test)'
+
 const PROMPTS = {
   haiku: 'Write a haiku about a friendly, goofy surfer-dude lizard.',
   // Pin the "Draft Image" preset (fast SD1.5, 512x512) so this cheap gate uses the
@@ -48,8 +57,10 @@ test.describe('Agentic smoke', () => {
       await app.resetPresetDefaults('Chat')
 
       // Pin the chat backend for this variant; skip OpenVINO where it isn't offered.
+      test.skip(SMALL_MODELS && backend.optional, `${SMALL_CHAT_MODEL} runs on llama.cpp only`)
       const pinned = await app.selectChatBackendOrSkip(backend.label, backend.optional)
       test.skip(!pinned, `${backend.name} chat backend is not available in this product mode`)
+      if (SMALL_MODELS) await app.selectChatModel(SMALL_CHAT_MODEL)
 
       // Trim the tool set to the bare minimum this smoke needs (only "Generate media"
       // with the "Draft Image" workflow; MCP + all other tools off). With every tool and
@@ -77,6 +88,17 @@ test.describe('Agentic smoke', () => {
         await app.main.assertWellFormedResponse()
         imagesBeforeImageTurn = await app.main.generatedImages.count()
       })
+
+      if (SMALL_MODELS) {
+        await app.runComfyPreset({
+          mode: 'Image Gen',
+          preset: SMALL_IMAGE_PRESET,
+          output: 'image',
+          prompt: PROMPTS.haiku,
+          timeout: MainPage.IMAGE_TIMEOUT,
+        })
+        return
+      }
 
       await test.step('Prompt 2: turn the haiku into an image → expect an image', async () => {
         await app.main.sendPrompt(PROMPTS.toImage)

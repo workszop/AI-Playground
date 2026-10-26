@@ -44,7 +44,8 @@ const devOnlyModels: Model[] = [
     supportsToolCalling: true,
     supportsVision: false,
     supportsReasoning: false,
-    maxContextSize: 1024,
+    // The model takes 128k; 1024 could not hold the tool schemas of a single agentic turn.
+    maxContextSize: 32768,
   },
 ]
 

@@ -730,6 +730,15 @@ export class AppDriver {
     })
   }
 
+  /** Pin the active chat preset's model by its picker label (the GGUF file name). */
+  async selectChatModel(label: string): Promise<void> {
+    await test.step(`Pin chat model: ${label}`, async () => {
+      await this.settings.open('Chat')
+      await this.settings.selectModel(label, 'Chat')
+      await this.settings.close('Chat')
+    })
+  }
+
   /**
    * Open the Chat settings and select the first inference device whose label contains
    * `substring` (e.g. 'NPU'). Returns false when the active backend exposes no matching

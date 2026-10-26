@@ -1001,15 +1001,20 @@ model, so the media plumbing (tool catalogs, the media specialist agent, workflo
 substitution, `MediaItem` typing, workspace saving, UI rendering) can be smoke-tested on a
 laptop. They are injected by `WebUI/src/assets/js/store/devPresets.ts` when
 `debugToolsEnabled` is true or settings.json sets `showDebugSettingsInUI`, mirroring the
-dev-only test LLM in `models.ts`, and they use only core ComfyUI nodes — no models, no
-custom nodes, no downloads.
+dev-only test LLM in `models.ts`, and they use only core ComfyUI nodes — no generation
+models, no installs. The two still-image dummies save through the kids-safe `SafetyChecker`
+(the image filter refuses any still image that skips it), so on a fresh machine their first
+run downloads the ~330 MB NSFW detector.
 
-| Preset                  | Mode / tool category        | Output              | Graph                                      |
-| ----------------------- | --------------------------- | ------------------- | ------------------------------------------ |
-| `Dummy Image (test)`    | Image Gen / `create-images` | solid-colour PNG    | `EmptyImage` → `SaveImage`                 |
-| `Dummy Edit (test)`     | Image Edit / `edit-images`  | colour-inverted PNG | `LoadImage` → `ImageInvert` → `SaveImage`  |
-| `Dummy Video (test)`    | Video / `create-videos`     | solid-colour mp4    | `EmptyImage` → `CreateVideo` → `SaveVideo` |
-| `Dummy 3D Model (test)` | Image Edit / `edit-images`  | placeholder `.glb`  | `Load3D` → `SaveGLB`                       |
+| Preset                  | Mode / tool category        | Output              | Graph                                                       |
+| ----------------------- | --------------------------- | ------------------- | ----------------------------------------------------------- |
+| `Dummy Image (test)`    | Image Gen / `create-images` | solid-colour PNG    | `EmptyImage` → `SafetyChecker` → `SaveImage`                |
+| `Dummy Edit (test)`     | Image Edit / `edit-images`  | colour-inverted PNG | `LoadImage` → `ImageInvert` → `SafetyChecker` → `SaveImage` |
+| `Dummy Video (test)`    | Video / `create-videos`     | solid-colour mp4    | `EmptyImage` → `CreateVideo` → `SaveVideo`                  |
+| `Dummy 3D Model (test)` | Image Edit / `edit-images`  | placeholder `.glb`  | `Load3D` → `SaveGLB`                                        |
+
+`E2E_SMALL_MODELS=1 npm run e2e:fast` runs the smoke on a laptop iGPU: the text turn on the
+test LLM, the image through `Dummy Image (test)` in Image Gen (llama.cpp only).
 
 Notes:
 

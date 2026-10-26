@@ -19,7 +19,7 @@ Patch dodaje do aplikacji Intel AI Playground filtry tekstu i obrazów oraz wył
 
 - Prompt obrazu, wpisany w panelu albo wysłany przez narzędzie w czacie, jest sprawdzany tak samo jak wiadomość na czacie, zanim ruszy ComfyUI.
 - Każdy wygenerowany obraz ocenia klasyfikator NSFW (vit-base-nsfw-detector). Obraz z wynikiem powyżej 0,4 wraca czarny.
-- W oryginalnej aplikacji filtr był domyślnie wyłączony i dało się go wyłączyć. Tutaj działa zawsze, z progiem zablokowanym na 0,4. Ustawienia nie ma w interfejsie, a stare zapisane wartości są ignorowane.
+- W oryginalnej aplikacji filtr był domyślnie włączony z progiem 0,5, ale użytkownik mógł go zmienić suwakiem, a ustawiony na 0 przestawał cokolwiek blokować. Tutaj działa zawsze, z progiem zablokowanym na 0,4. Ustawienia nie ma w interfejsie, a stare zapisane wartości są ignorowane.
 - Oryginalny węzeł oceniał tylko pierwszy obraz z serii. Teraz ocenia każdy, a gdy choć jeden przekroczy próg, czarna wraca cała seria.
 - Filtr dostały też presety, które go nie miały: warianty OpenVINO, Colorize, Change Face i Upscale.
 - Podgląd na żywo jest wyłączony, bo pokazywał niefiltrowane klatki pośrednie.

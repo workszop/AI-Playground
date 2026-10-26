@@ -141,9 +141,9 @@ index-strategy = "unsafe-best-match"
 # 2.13 Linux breakage was a driver-version mismatch, not a code bug — the cu130 /
 # xpu wheels require a recent NVIDIA / Intel GPU driver on Linux. Ensure the target
 # driver floor is met before deploying.
-required-environments = ["sys_platform == 'win32'", "sys_platform == 'darwin'", "sys_platform == 'linux'"]
+required-environments = ["sys_platform == 'win32'", "sys_platform == 'darwin'", "sys_platform == 'linux' and platform_machine == 'x86_64'"]
 prerelease = "if-necessary-or-explicit"
-environments = ["sys_platform == 'win32'", "sys_platform == 'darwin'", "sys_platform == 'linux'"]
+environments = ["sys_platform == 'win32'", "sys_platform == 'darwin'", "sys_platform == 'linux' and platform_machine == 'x86_64'"]
 conflicts = [
   [
     { extra = "xpu" },

@@ -7,6 +7,14 @@ const execAsync = promisify(childProcess.exec)
 
 type AppLogger = Pick<typeof appLoggerInstance, 'info' | 'warn' | 'error'>
 
+let spawnBlocked: () => boolean = () => false
+const liveBackends = new Set<ChildProcess>()
+
+/** Wired to the app teardown so spawnBackend() refuses once it has begun. */
+export function setBackendSpawnBlocked(blocked: () => boolean): void {
+  spawnBlocked = blocked
+}
+
 /**
  * Spawn a long-lived backend so that its whole descendant tree can be torn down
  * later.
@@ -28,11 +36,32 @@ export function spawnBackend(
   args: readonly string[],
   options: childProcess.SpawnOptions = {},
 ): ChildProcess {
-  return childProcess.spawn(command, args, {
+  // A readiness call racing the teardown would start a server after its stop step ran.
+  if (spawnBlocked()) throw new Error(`Not starting ${command}: the app is shutting down`)
+  const child = childProcess.spawn(command, args, {
     windowsHide: true,
     ...options,
     detached: process.platform !== 'win32',
   })
+  liveBackends.add(child)
+  child.once('exit', () => liveBackends.delete(child))
+  child.once('error', () => {
+    if (child.pid === undefined) liveBackends.delete(child)
+  })
+  return child
+}
+
+/**
+ * Last teardown step: reap every backend spawnBackend() started that is still
+ * alive. Services only track a server once it is ready, and skip themselves
+ * when 'stopped', so a server loading at quit time was orphaned.
+ */
+export async function terminateSpawnedBackends(appLogger?: AppLogger): Promise<void> {
+  await Promise.all(
+    [...liveBackends].map((child) =>
+      terminateProcessTree(child, { name: 'teardown', label: `pid ${child.pid}`, appLogger }),
+    ),
+  )
 }
 
 export interface TerminateProcessTreeOptions {

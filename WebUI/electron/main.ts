@@ -311,6 +311,10 @@ import {
 import { registerSettingsPersist } from './adapters/hardware/defaultDeviceSelection.ts'
 import { appShutdown } from './kernel/shutdown.ts'
 import {
+  setBackendSpawnBlocked,
+  terminateSpawnedBackends,
+} from './adapters/install/processLifecycle.ts'
+import {
   handleChatTelemetryEvent,
   initLaminarTracing,
   laminarConfig,
@@ -1086,6 +1090,8 @@ setRagAccess({
   },
 })
 
+setBackendSpawnBlocked(() => appShutdown.isShuttingDown())
+
 // Everything the app spawns, torn down in dependency order: the agent first,
 // because its extensions flush state on shutdown (persistent memory writes what
 // it learned) and may still call into MCP, the services and the browser.
@@ -1100,6 +1106,7 @@ appShutdown.register({
     return service instanceof LlamaCppBackendService ? service.stopGuardServer() : undefined
   },
 })
+appShutdown.register({ name: 'untracked backends', run: () => terminateSpawnedBackends() })
 appShutdown.register({
   name: 'langchain worker',
   run: () => {

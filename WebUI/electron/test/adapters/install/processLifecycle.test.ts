@@ -5,8 +5,10 @@ import {
   killStaleProcesses,
   parsePosixSnapshot,
   parseWindowsSnapshot,
+  setBackendSpawnBlocked,
   spawnBackend,
   terminateProcessTree,
+  terminateSpawnedBackends,
 } from '../../../adapters/install/processLifecycle'
 
 vi.mock('electron', () => ({
@@ -100,6 +102,27 @@ onPosix('terminateProcessTree, with real processes', () => {
     } finally {
       process.kill(-child.pid!, 'SIGKILL')
     }
+  })
+})
+
+describe('spawnBackend during teardown', () => {
+  afterEach(() => setBackendSpawnBlocked(() => false))
+
+  it('refuses to start a backend once teardown has begun', () => {
+    let tearingDown = false
+    setBackendSpawnBlocked(() => tearingDown)
+    tearingDown = true
+    expect(() => spawnBackend('sh', ['-c', 'sleep 60'], { stdio: 'ignore' })).toThrow(
+      /shutting down/,
+    )
+  })
+})
+
+onPosix('terminateSpawnedBackends', () => {
+  it('reaps a backend no service is tracking, such as one still loading', async () => {
+    const child = spawnBackend('sh', ['-c', 'sleep 60'], { stdio: 'ignore' })
+    await terminateSpawnedBackends(logger)
+    expect(await eventually(() => !isAlive(child.pid!))).toBe(true)
   })
 })
 

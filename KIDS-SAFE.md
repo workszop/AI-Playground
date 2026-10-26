@@ -51,6 +51,21 @@ Aplikacja wybiera miejsce dla modelu bezpieczeństwa na podstawie sprzętu i pr�
 - `comfyui-deps/custom_nodes/SafetyChecker/nodes.py` i presety w `modes/base/`: filtr wygenerowanych obrazów.
 - `WebUI/electron/safety/imageFilter.ts` i `WebUI/electron/artifact/runner.ts`: kontrola nienaruszalności filtra obrazów.
 
+## Modele i licencje
+
+Wszystkie modele i komponenty, których używają filtry, są na licencji Apache 2.0.
+
+| Komponent | Do czego służy | Oparty na | Licencja |
+| --- | --- | --- | --- |
+| [`mradermacher/Qwen3Guard-Gen-4B-GGUF`](https://huggingface.co/mradermacher/Qwen3Guard-Gen-4B-GGUF) (Q4_K_M) | Główny model bezpieczeństwa | [`Qwen/Qwen3Guard-Gen-4B`](https://huggingface.co/Qwen/Qwen3Guard-Gen-4B), czyli `Qwen/Qwen3-4B` | Apache 2.0 |
+| [`QuantFactory/Qwen3Guard-Gen-0.6B-GGUF`](https://huggingface.co/QuantFactory/Qwen3Guard-Gen-0.6B-GGUF) (Q8_0) | Zapasowy model bezpieczeństwa | [`Qwen/Qwen3Guard-Gen-0.6B`](https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B), czyli `Qwen/Qwen3-0.6B` | Apache 2.0 |
+| [`AdamCodd/vit-base-nsfw-detector`](https://huggingface.co/AdamCodd/vit-base-nsfw-detector) | Filtr wygenerowanych obrazów | [`google/vit-base-patch16-384`](https://huggingface.co/google/vit-base-patch16-384) | Apache 2.0 |
+| Węzeł `SafetyChecker` (`comfyui-deps/custom_nodes/SafetyChecker/`) | Uruchamia filtr obrazów w ComfyUI | [BetaDoggo/ComfyUI-YetAnotherSafetyChecker](https://github.com/BetaDoggo/ComfyUI-YetAnotherSafetyChecker/) przez oryginalną aplikację Intela | Apache 2.0, zmiany opisane w nagłówku pliku |
+
+Lista słów w `kidsGuard.ts` została napisana dla tego projektu i nie pochodzi z żadnej publicznej listy. Filtry nie dodają żadnych pakietów npm ani Pythona.
+
+Aplikacja nie zawiera modeli. Pobiera je z Hugging Face dopiero przy pierwszym użyciu, więc nie trzeba dołączać do niej ich licencji. Jeśli modele zostaną kiedyś dołączone do instalatora, trzeba dołączyć też tekst licencji Apache 2.0 i plik NOTICE, jeśli repozytorium modelu go zawiera.
+
 ## Ograniczenia
 
 Żaden filtr nie jest doskonały. W zestawie 50 polskich promptów model 4B razem z listą słów przepuścił 0 z 30 szkodliwych i zablokował 1 z 20 niewinnych (rodzina w strojach kąpielowych na basenie). Zestaw jest mały, więc te liczby to tylko wskazówka. Najsłabszy punkt to krótki polski slang i właśnie dla niego istnieje lista słów.

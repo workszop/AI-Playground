@@ -103,30 +103,6 @@ describe('useConversations hydration', () => {
     await vi.waitFor(() => expect(store.lastMainKey).toBe(draftKeys[0]))
   })
 
-  it('normalizes a saved Home Agent thread into an ordinary desktop chat', async () => {
-    api.bootstrap.mockResolvedValue(
-      okBootstrap([
-        {
-          id: '__aipg_home_agent__',
-          meta: { presetName: 'Home Agent', kind: 'homeAgent' },
-          ragHashes: [],
-          messages: [{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'legacy' }] }],
-        },
-      ]),
-    )
-    const { useConversations } = await import('@/assets/js/store/conversations')
-    const store = useConversations()
-
-    await store.init()
-
-    expect(store.conversationList.__aipg_home_agent__).toHaveLength(1)
-    expect(store.getThreadMeta('__aipg_home_agent__')).toMatchObject({
-      presetName: '',
-      kind: 'main',
-    })
-    expect(api.save).not.toHaveBeenCalled()
-  })
-
   it('migrates the legacy localStorage state once and drops the key', async () => {
     api.bootstrap.mockResolvedValue({ status: 'empty' })
     api.migrate.mockImplementation(async (payload: unknown) => {

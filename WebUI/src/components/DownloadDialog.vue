@@ -224,7 +224,6 @@ import { useGlobalSetup } from '@/assets/js/store/globalSetup'
 import ProgressBar from './ProgressBar.vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useI18N } from '@/assets/js/store/i18n'
-import * as toast from '@/assets/js/toast'
 import { useModels } from '@/assets/js/store/models'
 import { useDialogStore } from '@/assets/js/store/dialogs.ts'
 import { EtaEstimator } from '@/lib/etaEstimator'
@@ -242,7 +241,6 @@ const dialogStore = useDialogStore()
 const { downloadDialogVisible, downloadList, downloadSuccessFunction, downloadFailFunction } =
   storeToRefs(dialogStore)
 
-let downloding = false
 const curDownloadTip = ref('')
 const allDownloadTip = ref('')
 const percent = ref(0)
@@ -252,7 +250,6 @@ const sizeRequesting = ref(false)
 const hashError = ref(false)
 const errorText = ref('')
 const downloadErrorRetryable = ref(false)
-let activeDownloadSessionId: number | null = null
 const animate = ref(false)
 const readTerms = ref(false)
 const downloadModelRender = ref<DownloadModelRender[]>([])
@@ -291,12 +288,6 @@ watch(
 async function initializeDownloadDialog(sessionId: number) {
   const fail = downloadFailFunction.value
   const requestedModels = downloadList.value.slice()
-  if (downloding && activeDownloadSessionId === sessionId) {
-    toast.error(i18nState.DOWNLOADER_CONFLICT)
-    fail?.({ type: 'conflict' })
-    dialogStore.closeDownloadDialog(sessionId)
-    return
-  }
 
   sizeRequesting.value = true
   curDownloadTip.value = i18nState.DOWNLOADER_CONFRIM_TIP
@@ -376,8 +367,6 @@ async function download() {
   const fail = downloadFailFunction.value
   await dialogStore.waitForDownloadCleanup()
   if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
-  downloding = true
-  activeDownloadSessionId = sessionId
   const accessableDownloadList = downloadModelRender.value.filter(
     (item) => item.accessGranted === true,
   )
@@ -409,7 +398,6 @@ async function download() {
     onError: (e) => {
       if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
       hashError.value = true
-      downloding = false
       downloadErrorRetryable.value = e.retryable
       switch (e.errType) {
         case 'not_enough_disk_space':
@@ -436,8 +424,6 @@ async function download() {
   })
     .then(() => {
       if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
-      downloding = false
-      activeDownloadSessionId = null
       dialogStore.finishDownloadSession(sessionId)
       success?.()
     })
@@ -445,8 +431,6 @@ async function download() {
       // onError already surfaced a structured failure; an abort or other
       // rejection just needs to stop the spinner.
       if (!dialogStore.isDownloadSessionCurrent(sessionId)) return
-      downloding = false
-      activeDownloadSessionId = null
       dialogStore.registerDownloadCancel(sessionId)
     })
   dialogStore.registerDownloadCancel(sessionId, async () => {

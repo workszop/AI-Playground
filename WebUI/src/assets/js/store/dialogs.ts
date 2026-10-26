@@ -2,6 +2,7 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 import { sanitizeMarkdown } from '@/lib/sanitize'
 import { parse } from '../markdownParser'
+import { useI18N } from './i18n'
 
 // todo: Consider adding "add-l-l-m-dialog" as well
 export type PresetRequirementsData = {
@@ -33,6 +34,8 @@ export type InstallationProgressData = {
 }
 
 export const useDialogStore = defineStore('dialog', () => {
+  const i18nState = useI18N().state
+
   // Warning dialog state
   const warningDialogVisible = ref(false)
   const warningMessage = ref('')
@@ -127,8 +130,15 @@ export const useDialogStore = defineStore('dialog', () => {
     success?: () => void,
     fail?: (reason?: unknown) => void,
     options?: { requestId?: string },
-  ) {
+  ): number | null {
     const previousSessionId = currentDownloadSessionId.value
+    const previous =
+      previousSessionId !== null ? downloadSessions.get(previousSessionId) : undefined
+    // A transfer in progress keeps the dialog; only an unanswered prompt is replaced.
+    if (previous?.cancel && !previous.cancelling) {
+      fail?.(new Error(i18nState.DOWNLOADER_CONFLICT))
+      return null
+    }
     if (previousSessionId !== null) {
       downloadCleanupTail = downloadCleanupTail.then(() => cancelDownloadSession(previousSessionId))
     }

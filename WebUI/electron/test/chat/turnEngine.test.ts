@@ -1206,6 +1206,27 @@ describe('turn engine', () => {
     expect(chatTurnActive('conv-1')).toBe(false)
   })
 
+  it('keeps a GPU device-lost crash recognizable without its raw text', async () => {
+    const rawDetails = 'vk::Device::getFenceStatus: ErrorDeviceLost at secret.cpp:42'
+    guardUiMessageStreamMock.mockImplementationOnce(
+      () =>
+        new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            controller.error(new Error(rawDetails))
+          },
+        }),
+    )
+    queueFetchMock(sse(textChunks('never shown')))
+    const { turnId } = submitChatTurn(turnRequest())
+    await waitForTurnDone(turnId)
+
+    const error = chatChunks().find((c) => c.type === 'error') as { errorText?: string } | undefined
+    expect(error?.errorText).toBe('The GPU reported device lost during generation.')
+    // The renderer's inferenceFailureHint keys off this phrase.
+    expect(error!.errorText!.toLowerCase()).toContain('device lost')
+    expect(JSON.stringify(events)).not.toContain('secret.cpp')
+  })
+
   it('cancels a turn without surfacing an error chunk', async () => {
     queueFetchMock(pending())
     const { turnId } = submitChatTurn(turnRequest())

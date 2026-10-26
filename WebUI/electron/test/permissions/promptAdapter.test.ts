@@ -34,7 +34,7 @@ afterEach(() => {
 })
 
 describe('permissions prompt adapter cancellation', () => {
-  it('rejects an owned prompt and asks the renderer to dismiss it', async () => {
+  it('rejects an owned prompt at once and asks the renderer to dismiss it', async () => {
     const controller = new AbortController()
     const pending = requestPermissionsPrompt<boolean>(
       { kind: 'download', models: [] },
@@ -44,20 +44,24 @@ describe('permissions prompt adapter cancellation', () => {
     expect(prompt.channel).toBe('permissions:prompt')
     controller.abort()
 
-    expect(await Promise.race([pending, Promise.resolve('pending')])).toBe('pending')
+    await expect(pending).rejects.toMatchObject({ cancelled: true })
     expect(sent.at(-1)).toEqual({
       channel: 'permissions:cancel',
       payload: { requestId: prompt.payload.requestId },
     })
-    expect(permissionPromptsPending()).toBe(1)
-
-    handlePermissionsPromptResponse({
-      requestId: prompt.payload.requestId,
-      error: 'Permission prompt cancelled',
-      cancelled: true,
-    })
-    await expect(pending).rejects.toMatchObject({ cancelled: true })
     expect(permissionPromptsPending()).toBe(0)
+  })
+
+  it('ignores a late reply to a cancelled prompt', async () => {
+    const controller = new AbortController()
+    const pending = requestPermissionsPrompt<boolean>(
+      { kind: 'download', models: [] },
+      { signal: controller.signal },
+    )
+    const payload = sent[0]!.payload as PermissionsPromptPayload
+    controller.abort()
+    handlePermissionsPromptResponse({ requestId: payload.requestId, result: true })
+    await expect(pending).rejects.toMatchObject({ cancelled: true })
   })
 
   it('does not cancel an unrelated prompt', async () => {
@@ -74,11 +78,6 @@ describe('permissions prompt adapter cancellation', () => {
     const secondPayload = sent[1]!.payload as PermissionsPromptPayload
 
     firstController.abort()
-    handlePermissionsPromptResponse({
-      requestId: firstPayload.requestId,
-      error: 'Permission prompt cancelled',
-      cancelled: true,
-    })
     await expect(first).rejects.toMatchObject({ cancelled: true })
     expect(permissionPromptsPending()).toBe(1)
 

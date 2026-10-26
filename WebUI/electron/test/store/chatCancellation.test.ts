@@ -140,16 +140,16 @@ describe('conversation-scoped chat cancellation', () => {
     expect(remoteBusy).toBe(true)
   })
 
-  it('keeps the stopped prompt available for retry and reports a subsequent failure', async () => {
+  it('clears a stopped prompt already in the history and reports a subsequent failure', async () => {
     const chat = useOpenAiCompatibleChat()
-    const first = chat.generate('keep this question')
+    const first = chat.generate('stopped question')
     await vi.waitFor(() => expect(state.streams.has('local')).toBe(true))
     await chat.stop()
     await first
-    expect(chat.messageInput).toBe('keep this question')
+    expect(chat.messageInput).toBe('')
 
     state.streams.delete('local')
-    const retry = chat.generate(chat.messageInput)
+    const retry = chat.generate('next question')
     await vi.waitFor(() => expect(state.streams.has('local')).toBe(true))
     const failure = new Error('Retry failed')
     state.streams.get('local')!.error(failure)

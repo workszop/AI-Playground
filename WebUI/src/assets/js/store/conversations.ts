@@ -7,11 +7,7 @@ import { currentPresetName } from '@/lib/presetRenames'
 import { makeForwardPersist } from '@/lib/ipcPersist'
 import { cloneForIpc } from '@/lib/cloneForIpc'
 import { useErrors } from './errors'
-import type {
-  ConversationBootstrap,
-  ConversationLegacyState,
-  ConversationThreadMeta as IpcConversationThreadMeta,
-} from '@/types/conversationIpc'
+import type { ConversationBootstrap, ConversationLegacyState } from '@/types/conversationIpc'
 
 /** Legacy fixed key for the original remote thread. It is kept as a normal chat. */
 export const HOME_AGENT_CONVERSATION_KEY = '__aipg_home_agent__'
@@ -30,29 +26,6 @@ export type ConversationThreadMeta = {
 export type CreateConversationOptions = {
   presetName?: string
   variant?: string | null
-}
-
-const LEGACY_HOME_AGENT_PRESET_NAME = 'Home Agent'
-
-/** Convert metadata written by the removed remote chat into a desktop thread. */
-export function normalizeConversationThreadMeta(
-  meta: IpcConversationThreadMeta | ConversationThreadMeta | null | undefined,
-): ConversationThreadMeta | undefined {
-  if (!meta) return undefined
-  return {
-    ...meta,
-    presetName: meta.presetName === LEGACY_HOME_AGENT_PRESET_NAME ? '' : meta.presetName,
-    kind: 'main',
-  }
-}
-
-function normalizeLegacyState(legacy: ConversationLegacyState): ConversationLegacyState {
-  const meta: Record<string, IpcConversationThreadMeta> = {}
-  for (const [key, value] of Object.entries(legacy.conversationThreadMeta)) {
-    const normalized = normalizeConversationThreadMeta(value)
-    if (normalized) meta[key] = normalized
-  }
-  return { ...legacy, conversationThreadMeta: meta }
 }
 
 // The old Pinia-persist key (store id). Read exactly once — the one-shot
@@ -151,11 +124,9 @@ export const useConversations = defineStore('conversations', () => {
   }
 
   function setThreadMeta(conversationKey: string, meta: ConversationThreadMeta) {
-    const normalized = normalizeConversationThreadMeta(meta)
-    if (!normalized) return
     conversationThreadMeta.value[conversationKey] = {
       ...conversationThreadMeta.value[conversationKey],
-      ...normalized,
+      ...meta,
     }
   }
 
@@ -225,8 +196,7 @@ export const useConversations = defineStore('conversations', () => {
     const rag: Record<string, string[]> = {}
     for (const thread of bootstrap.threads) {
       list[thread.id] = thread.messages as AipgUiMessage[]
-      const normalizedMeta = normalizeConversationThreadMeta(thread.meta)
-      if (normalizedMeta) meta[thread.id] = normalizedMeta
+      if (thread.meta) meta[thread.id] = thread.meta
       if (thread.ragHashes.length > 0) rag[thread.id] = thread.ragHashes
     }
     conversationList.value = list
@@ -242,12 +212,12 @@ export const useConversations = defineStore('conversations', () => {
     try {
       const parsed = JSON.parse(raw) as Partial<ConversationLegacyState>
       if (!parsed || typeof parsed !== 'object' || !parsed.conversationList) return null
-      return normalizeLegacyState({
+      return {
         conversationList: parsed.conversationList,
         conversationThreadMeta: parsed.conversationThreadMeta ?? {},
         conversationRagSelection: parsed.conversationRagSelection ?? {},
         lastMainKey: parsed.lastMainKey ?? null,
-      })
+      }
     } catch {
       return null
     }
@@ -270,7 +240,7 @@ export const useConversations = defineStore('conversations', () => {
         ) {
           const legacy = readLegacyState()
           if (legacy && Object.keys(legacy.conversationList).length > 0) {
-            bootstrap = await window.electronAPI.conversations.migrate(normalizeLegacyState(legacy))
+            bootstrap = await window.electronAPI.conversations.migrate(legacy)
           }
         }
         // Files own the threads: drop the Pinia key. Keep it when migrate
@@ -305,7 +275,6 @@ export const useConversations = defineStore('conversations', () => {
       }
       if (bootstrap) hydrateFrom(bootstrap)
 
-      normalizeLegacyThreadMetadata(conversationThreadMeta.value)
       // A thread names the preset it was held with; a renamed preset no longer
       // answers to that name, which would leave the thread's preset unresolved.
       followRenamedPresets(conversationThreadMeta.value)
@@ -363,13 +332,6 @@ function addNewConversationIfLatestIsNotEmpty(list: Record<string, AipgUiMessage
   const newKey = new Date().getTime().toString()
   list[newKey] = []
   return newKey
-}
-
-function normalizeLegacyThreadMetadata(meta: Record<string, ConversationThreadMeta>): void {
-  for (const [key, value] of Object.entries(meta)) {
-    const normalized = normalizeConversationThreadMeta(value)
-    if (normalized) meta[key] = normalized
-  }
 }
 
 /**

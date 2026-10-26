@@ -138,7 +138,6 @@ export async function transcribe(req: { audio: Blob }): Promise<TranscriptResult
  * engine path of the `synthesizeTextToSpeech` tool. Qwen3 honors the full voice request;
  * Kokoro and the external endpoint synthesize with their configured voice.
  */
-export function synthesizeClip(req: SynthesizeClipRequest): Promise<SpeechClipResult>
 export async function synthesizeClip(req: SynthesizeClipRequest): Promise<SpeechClipResult> {
   const tts = useTextToSpeech()
   const text = req.text
@@ -181,42 +180,32 @@ export async function synthesizeClip(req: SynthesizeClipRequest): Promise<Speech
   }
 
   req.onPhase?.('generating')
-  return await kokoroExternalClip({ text, interactive: true })
+  return await kokoroExternalToolClip(text)
 }
 
-/** The Kokoro/external wire-up shared by speech-tool synthesis and playback. */
-async function kokoroExternalClip(req: {
-  text: string
-  interactive: true
-}): Promise<SpeechClipResult>
-async function kokoroExternalClip(req: {
-  text: string
-  interactive: false
-}): Promise<SpeechClipResult | null>
-async function kokoroExternalClip(req: {
-  text: string
-  interactive: boolean
-}): Promise<SpeechClipResult | null> {
+/** Kokoro/external synthesis for the speech tool; may prompt the Kokoro model download. */
+async function kokoroExternalToolClip(text: string): Promise<SpeechClipResult> {
   const tts = useTextToSpeech()
-
-  if (req.interactive) {
-    const { audioBase64, voice } = await tts.synthesizeToWav(req.text)
-    return {
-      audioBase64,
-      mediaType: 'audio/wav',
-      voice,
-      engine: tts.selectedEngine === 'kokoro' ? 'kokoro' : 'external',
-    }
+  const { audioBase64, voice } = await tts.synthesizeToWav(text)
+  return {
+    audioBase64,
+    mediaType: 'audio/wav',
+    voice,
+    engine: tts.selectedEngine === 'kokoro' ? 'kokoro' : 'external',
   }
+}
 
-  // Kokoro / external endpoint. `available` covers exactly those two.
+/** Kokoro/external synthesis for reply playback; `null` when no endpoint can serve. */
+async function kokoroExternalPlaybackClip(text: string): Promise<SpeechClipResult | null> {
+  const tts = useTextToSpeech()
+  // `available` covers exactly Kokoro and the external endpoint.
   if (!tts.available) return null
   // Start the OVMS speech server on demand (no dialog; no-op if already up or
   // the model isn't installed — a configured fallback still serves).
   await tts.ensureSpeechServerRunning()
   const endpoint = await tts.resolveSpeech()
   if (!endpoint) return null
-  const { bytes, mediaType } = await synthesizeSpeech(req.text, endpoint)
+  const { bytes, mediaType } = await synthesizeSpeech(text, endpoint)
   return {
     audioBase64: bytesToBase64(bytes),
     mediaType: mediaType || 'audio/wav',
@@ -301,7 +290,7 @@ export async function speak(req: { text: string; messageId?: string }): Promise<
 
   try {
     // Reply playback uses the non-Qwen3 path without opening a download prompt.
-    const clip = await kokoroExternalClip({ text: trimmed, interactive: false })
+    const clip = await kokoroExternalPlaybackClip(trimmed)
     if (gen !== speakGeneration) return
     if (!clip) {
       useErrors().report(

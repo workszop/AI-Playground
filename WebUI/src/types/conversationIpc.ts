@@ -23,6 +23,13 @@ export const ConversationThreadMetaSchema = z.object({
 
 export type ConversationThreadMeta = z.infer<typeof ConversationThreadMetaSchema>
 
+/** Thread meta as main hands it out, after `normalizeThreadMeta`. */
+export const DesktopThreadMetaSchema = ConversationThreadMetaSchema.extend({
+  kind: z.literal('main').optional(),
+})
+
+export type DesktopThreadMeta = z.infer<typeof DesktopThreadMetaSchema>
+
 /** One thread's durable document (`conversations/<id>.json`). */
 export const ConversationThreadFileSchema = z.object({
   schemaVersion: z.literal(1),
@@ -80,7 +87,7 @@ export type ConversationLegacyState = z.infer<typeof ConversationLegacyStateSche
 /** A hydrated thread as `conversations:bootstrap` / `conversations:migrate` return it. */
 export const ConversationHydratedThreadSchema = z.object({
   id: z.string(),
-  meta: ConversationThreadMetaSchema.nullable(),
+  meta: DesktopThreadMetaSchema.nullable(),
   ragHashes: z.array(z.string()),
   messages: z.array(z.unknown()),
 })

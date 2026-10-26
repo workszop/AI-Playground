@@ -154,6 +154,15 @@ async function assembleAssistantFromStream(
 // ── Inference error surfacing (ported from the chat store) ────────────────────
 
 const SAFE_TURN_FAILURE_MESSAGE = 'The request could not be completed. Please try again.'
+// Fixed wording that still carries the renderer's `inferenceFailureHint` keyword.
+const DEVICE_LOST_TURN_FAILURE_MESSAGE = 'The GPU reported device lost during generation.'
+
+/** A crashed turn's text can echo unguarded output, so only known faults pass as fixed text. */
+function safeTurnFailureMessage(detail: string): string {
+  return /device[\s_]?lost/i.test(detail)
+    ? DEVICE_LOST_TURN_FAILURE_MESSAGE
+    : SAFE_TURN_FAILURE_MESSAGE
+}
 
 function describeInferenceError(error: unknown): string {
   if (APICallError.isInstance(error)) {
@@ -1195,13 +1204,13 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
       emitFailure({
         category: 'inference',
         code: 'inference/turn-failed',
-        userMessage: SAFE_TURN_FAILURE_MESSAGE,
+        userMessage: safeTurnFailureMessage(detail),
         surface: 'silent',
         context: { conversationKey },
       })
       emitChatChunk(conversationKey, turnId, {
         type: 'error',
-        errorText: SAFE_TURN_FAILURE_MESSAGE,
+        errorText: safeTurnFailureMessage(detail),
       })
     }
   } finally {

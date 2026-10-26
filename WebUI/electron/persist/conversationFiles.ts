@@ -22,9 +22,11 @@ import {
   type ConversationIndexFile,
   type ConversationLegacyState,
   type ConversationSaveRequest,
+  type ConversationHydratedThread,
   type ConversationThreadFile,
-  type ConversationThreadMeta,
+  type DesktopThreadMeta,
 } from '@/types/conversationIpc'
+import { normalizeThreadMeta } from '@/lib/conversationThreadMeta'
 
 /**
  * The kernel's one-writer conversation store (architecture-target §6.1,
@@ -62,16 +64,9 @@ function conversationsDir(): string {
 
 const INDEX_CHAIN = 'index'
 const INDEX_FILE = 'index.json'
-const LEGACY_HOME_AGENT_PRESET_NAME = 'Home Agent'
 
-function normalizeThreadMeta(meta: ConversationThreadMeta | null): ConversationThreadMeta | null {
-  if (!meta) return null
-  return {
-    ...meta,
-    presetName: meta.presetName === LEGACY_HOME_AGENT_PRESET_NAME ? '' : meta.presetName,
-    kind: 'main',
-  }
-}
+/** A thread file as read back, its meta normalized at the disk boundary. */
+type ThreadDoc = Omit<ConversationThreadFile, 'meta'> & { meta: DesktopThreadMeta | null }
 
 function threadFile(id: string): string {
   assertSafeFileId(id, 'conversation')
@@ -82,12 +77,12 @@ function indexFile(): string {
   return path.join(conversationsDir(), INDEX_FILE)
 }
 
-function threadDocFromRead(read: JsonRead): ConversationThreadFile | null {
+function threadDocFromRead(read: JsonRead): ThreadDoc | null {
   if (read.status !== 'ok') return null
   return parseThreadDoc(read.value)
 }
 
-function parseThreadDoc(raw: unknown): ConversationThreadFile | null {
+function parseThreadDoc(raw: unknown): ThreadDoc | null {
   const parsed = ConversationThreadFileSchema.safeParse(raw)
   if (parsed.success) return { ...parsed.data, meta: normalizeThreadMeta(parsed.data.meta) }
   appLogger.warn('conversation thread failed schema; treated as missing', 'conversations')
@@ -172,19 +167,14 @@ function sanitizeMessages(messages: unknown[]): unknown[] {
 
 type MessageWithId = { id: string }
 
-type HydratedThread = {
-  id: string
-  meta: ConversationThreadMeta | null
-  ragHashes: string[]
-  messages: unknown[]
-}
-
-function hydratedThread(id: string, doc: ConversationThreadFile | null): HydratedThread {
+function hydratedThread(id: string, doc: ThreadDoc | null): ConversationHydratedThread {
   if (!doc) return { id, meta: null, ragHashes: [], messages: [] }
   return { id, meta: doc.meta, ragHashes: doc.ragHashes, messages: doc.messages }
 }
 
-async function threadsFromIndex(index: ConversationIndexFile): Promise<HydratedThread[]> {
+async function threadsFromIndex(
+  index: ConversationIndexFile,
+): Promise<ConversationHydratedThread[]> {
   return Promise.all(
     index.threads
       .filter((entry) => isSafeFileId(entry.id))
@@ -246,7 +236,7 @@ export async function migrateLegacyConversations(
       if (known.has(id)) continue
       const messages = sanitizeMessages(legacy.conversationList[id])
       const meta = normalizeThreadMeta(legacy.conversationThreadMeta[id] ?? null)
-      const doc: ConversationThreadFile = {
+      const doc: ThreadDoc = {
         schemaVersion: 1,
         meta,
         ragHashes: legacy.conversationRagSelection[id] ?? [],
@@ -276,7 +266,7 @@ export async function migrateLegacyConversations(
 
 async function writeThread(request: ConversationSaveRequest): Promise<void> {
   const now = Date.now()
-  const doc: ConversationThreadFile = {
+  const doc: ThreadDoc = {
     schemaVersion: 1,
     meta: normalizeThreadMeta(request.meta),
     ragHashes: request.ragHashes,
@@ -292,8 +282,8 @@ async function writeThread(request: ConversationSaveRequest): Promise<void> {
     const entry: ConversationIndexEntry = {
       id: request.id,
       title: titleFromMessages(doc.messages),
-      presetName: request.meta?.presetName || undefined,
-      kind: request.meta?.kind,
+      presetName: doc.meta?.presetName || undefined,
+      kind: doc.meta?.kind,
       updatedAt: now,
     }
     index.threads = [...index.threads.filter((thread) => thread.id !== request.id), entry]

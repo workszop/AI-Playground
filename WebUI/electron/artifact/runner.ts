@@ -206,6 +206,7 @@ type ActiveRun = {
   driveDone: Promise<void>
   resolveDriveDone: () => void
   cancelCleanup: Promise<void> | null
+  cancelSettling: Promise<void> | null
   promptSubmitted: boolean
 }
 
@@ -419,12 +420,32 @@ function cancelComfyExecution(run: ActiveRun): Promise<void> {
   ]).then(() => undefined)
 }
 
-async function settleCancelledAfterCleanup(run: ActiveRun): Promise<void> {
-  await run.driveDone
-  await run.cancelCleanup
+function settleCancelledAfterCleanup(run: ActiveRun): Promise<void> {
+  run.cancelSettling ??= drainCancelledRun(run)
+  return run.cancelSettling
+}
+
+async function drainCancelledRun(run: ActiveRun): Promise<void> {
+  // An install or backend call that never returns must not hold the queue forever.
+  const drained = await settlesWithin(
+    Promise.all([run.driveDone, run.cancelCleanup]),
+    GENERATION_IDLE_TIMEOUT_MS,
+  )
   if (run.settled) return
+  if (!drained) {
+    appLogger.warn('Cancelled generation did not stop within 5 minutes', 'electron-backend')
+    await cancelComfyExecution(run)
+  }
   settleItems(run, 'stopped')
   finish(run, { state: 'cancelled', items: doneItems(run), error: 'Generation cancelled.' })
+}
+
+function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms)
+  })
+  return Promise.race([promise.then(() => true), timeout]).finally(() => clearTimeout(timer))
 }
 
 function checkCompletion(run: ActiveRun): void {
@@ -503,6 +524,7 @@ function startRun(payload: ArtifactRunPayload): Promise<ArtifactRunResult> {
     driveDone,
     resolveDriveDone,
     cancelCleanup: null,
+    cancelSettling: null,
     promptSubmitted: false,
   }
   activeRun = run

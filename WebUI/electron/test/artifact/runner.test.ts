@@ -636,6 +636,24 @@ describe('artifact runner', () => {
     expect((await queued).state).toBe('completed')
   })
 
+  it('releases a cancelled run whose component install never returns', async () => {
+    vi.useFakeTimers()
+    vi.mocked(isCustomNodeInstalled).mockReturnValue(false)
+    vi.mocked(downloadCustomNode).mockClear()
+    vi.mocked(downloadCustomNode).mockImplementationOnce(() => new Promise<boolean>(() => {}))
+    setArtifactRunnerDeps(deps())
+    const run = submitArtifactRun(payload({ runId: 'hung-install-run' }))
+    await vi.advanceTimersByTimeAsync(10)
+    expect(downloadCustomNode).toHaveBeenCalledTimes(1)
+
+    cancelArtifactRun('hung-install-run')
+    await vi.advanceTimersByTimeAsync(4 * 60_000)
+    expect(await Promise.race([run, Promise.resolve('pending')])).toBe('pending')
+
+    await vi.advanceTimersByTimeAsync(2 * 60_000)
+    expect((await run).state).toBe('cancelled')
+  })
+
   it('starts the backend and waits for the running status before submitting', async () => {
     serviceStatus = 'stopped'
     setArtifactRunnerDeps(deps())

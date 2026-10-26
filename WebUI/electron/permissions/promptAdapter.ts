@@ -8,9 +8,7 @@ type PendingRequest = {
   resolve: (result: unknown) => void
   reject: (error: Error) => void
   onProgress?: () => void
-  onAbort?: () => void
   removeAbort?: () => void
-  cancelled?: boolean
 }
 
 const pending = new Map<string, PendingRequest>()
@@ -39,33 +37,33 @@ export function requestPermissionsPrompt<T>(
       reject,
       onProgress: options.onProgress,
     }
+    // A reloaded renderer no longer knows the request, so the abort cannot wait for its reply.
     const onAbort = () => {
-      const current = pending.get(requestId)
-      if (!current) return
-      current.cancelled = true
+      if (pending.get(requestId) !== entry) return
+      settle(entry)
       try {
         typedSend(win.webContents, 'permissions:cancel', { requestId })
       } catch {
         // The window may have been destroyed at the same time as cancellation.
-        pending.delete(requestId)
-        current.onAbort = undefined
-        current.removeAbort?.()
-        current.removeAbort = undefined
-        current.reject(cancellableError('Permission prompt cancelled', true))
       }
+      reject(cancellableError('Permission prompt cancelled', true))
     }
-    entry.onAbort = onAbort
     entry.removeAbort = () => options.signal?.removeEventListener('abort', onAbort)
     pending.set(requestId, entry)
     options.signal?.addEventListener('abort', onAbort, { once: true })
     try {
       typedSend(win.webContents, 'permissions:prompt', { ...payload, requestId })
     } catch (error) {
-      pending.delete(requestId)
-      entry.removeAbort?.()
+      settle(entry)
       reject(error instanceof Error ? error : new Error(String(error)))
     }
   })
+}
+
+function settle(entry: PendingRequest): void {
+  pending.delete(entry.requestId)
+  entry.removeAbort?.()
+  entry.removeAbort = undefined
 }
 
 export type CancellableError = Error & { cancelled?: boolean }
@@ -82,17 +80,10 @@ export function handlePermissionsPromptResponse(payload: PermissionsPromptRespon
   const entry = pending.get(payload.requestId)
   if (!entry) return
   if ('progress' in payload) {
-    if (!entry.cancelled) entry.onProgress?.()
+    entry.onProgress?.()
     return
   }
-  pending.delete(payload.requestId)
-  entry.onAbort = undefined
-  entry.removeAbort?.()
-  entry.removeAbort = undefined
-  if (entry.cancelled) {
-    entry.reject(cancellableError('Permission prompt cancelled', true))
-    return
-  }
+  settle(entry)
   if ('error' in payload) {
     entry.reject(cancellableError(payload.error, payload.cancelled === true))
   } else {
@@ -101,20 +92,14 @@ export function handlePermissionsPromptResponse(payload: PermissionsPromptRespon
 }
 
 export function rejectAllPermissionPrompts(reason: string): void {
-  for (const entry of pending.values()) {
-    entry.onAbort = undefined
-    entry.removeAbort?.()
+  for (const entry of [...pending.values()]) {
+    settle(entry)
     entry.reject(new Error(reason))
   }
-  pending.clear()
 }
 
 export function resetPermissionsPromptAdapterForTest(): void {
-  for (const entry of pending.values()) {
-    entry.onAbort = undefined
-    entry.removeAbort?.()
-  }
-  pending.clear()
+  for (const entry of [...pending.values()]) settle(entry)
 }
 
 export function permissionPromptsPending(): number {

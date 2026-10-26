@@ -1058,8 +1058,8 @@ export const useOpenAiCompatibleChat = defineStore(
         // 6. Live projection only — the engine already wrote the thread file.
         conversations.applyConversationMessages(chat.messages, targetKey)
 
-        // 7. Clear inputs only on a clean turn, so failures/stops are retryable.
-        if (clearInputs && !hadError && !wasStopped) {
+        // 7. Keep inputs only on a failure; a stopped prompt is already in the history.
+        if (clearInputs && !hadError) {
           messageInput.value = ''
           fileInput.value = []
         }

@@ -14,6 +14,19 @@ const TEST_ONLY_NOTE =
   'Only pick it when the user explicitly asks for a dummy, test or fast workflow — never for ' +
   'a genuine media request.'
 
+// The kids-safe build refuses any still-image workflow whose saved images skip a SafetyChecker.
+const NSFW_DETECTOR_MODELS = ['config.json', 'model.safetensors', 'preprocessor_config.json'].map(
+  (file) => ({ type: 'nsfwdetector' as const, model: `AdamCodd/vit-base-nsfw-detector/${file}` }),
+)
+
+function safetyCheckerNode(imageFrom: string) {
+  return {
+    class_type: 'SafetyChecker',
+    inputs: { image: [imageFrom, 0], threshold: 0.4 },
+    _meta: { title: 'Intercept NSFW Outputs' },
+  }
+}
+
 /** Filenames the 3D dummy expects inside the ComfyUI input directory. */
 export const GLB_FIXTURE = { name: 'aipg-dummy.glb', subfolder: '3d' }
 export const VIEW_FIXTURE = { name: 'aipg-dummy-view.png', subfolder: '' }
@@ -92,7 +105,7 @@ const dummyImagePreset: ComfyUiPreset = {
   toolInstructions: TEST_ONLY_NOTE,
   requiredCustomNodes: [],
   requiredPythonPackages: [],
-  requiredModels: [],
+  requiredModels: NSFW_DETECTOR_MODELS,
   resolutionConfig: dummyResolutionConfig,
   settings: [
     promptSetting,
@@ -121,9 +134,10 @@ const dummyImagePreset: ComfyUiPreset = {
     },
     '2': {
       class_type: 'SaveImage',
-      inputs: { filename_prefix: 'AIPG_DummyImage', images: ['1', 0] },
+      inputs: { filename_prefix: 'AIPG_DummyImage', images: ['3', 0] },
       _meta: { title: 'Save Image' },
     },
+    '3': safetyCheckerNode('1'),
   },
 }
 
@@ -218,7 +232,7 @@ const dummyEditPreset: ComfyUiPreset = {
     ' It inverts the colours of the source image, so the result is recognisably derived from it.',
   requiredCustomNodes: [],
   requiredPythonPackages: [],
-  requiredModels: [],
+  requiredModels: NSFW_DETECTOR_MODELS,
   settings: [promptSetting, seedSetting, batchSizeSetting, sourceImageSetting],
   comfyUiApiWorkflow: {
     '1': {
@@ -233,9 +247,10 @@ const dummyEditPreset: ComfyUiPreset = {
     },
     '3': {
       class_type: 'SaveImage',
-      inputs: { filename_prefix: 'AIPG_DummyEdit', images: ['2', 0] },
+      inputs: { filename_prefix: 'AIPG_DummyEdit', images: ['4', 0] },
       _meta: { title: 'Save Image' },
     },
+    '4': safetyCheckerNode('2'),
   },
 }
 

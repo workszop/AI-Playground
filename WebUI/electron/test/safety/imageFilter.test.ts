@@ -10,6 +10,7 @@ import {
   safetyThreshold,
 } from '../../safety/imageFilter'
 import { applyVariant, type ComfyUIApiWorkflow, type Preset } from '@/lib/presetSchemas'
+import { devPresets } from '@/lib/devPresetWorkflows'
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..')
 const SHIPPED_NODE_DIR = path.join(REPO_ROOT, 'comfyui-deps', 'custom_nodes', 'SafetyChecker')
@@ -160,6 +161,12 @@ describe('shipped presets', () => {
 
   it.each(cases)('%s keeps its image filter', (_name, wf, mediaType) => {
     expect(imageFilterProblem(wf, mediaType)).toBeNull()
+  })
+})
+
+describe('dev dummy presets', () => {
+  it.each(devPresets.map((p) => [p.name, p] as const))('%s keeps its image filter', (_n, p) => {
+    expect(p.type === 'comfy' && imageFilterProblem(p.comfyUiApiWorkflow, p.mediaType)).toBeNull()
   })
 })
 

@@ -32,9 +32,11 @@ describe('dummy workflow presets', () => {
     }
   })
 
-  it('declare no requirements, so they never trigger an install or download', () => {
+  it('need no install and download nothing but the image filter model', () => {
     for (const preset of devPresets) {
-      expect(preset.requiredModels, preset.name).toEqual([])
+      for (const model of preset.requiredModels ?? []) {
+        expect(model.type, preset.name).toBe('nsfwdetector')
+      }
       expect(preset.requiredCustomNodes, preset.name).toEqual([])
       expect(preset.requiredPythonPackages, preset.name).toEqual([])
     }

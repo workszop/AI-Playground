@@ -64,6 +64,8 @@ export function getAvailableEditWorkflows(): Array<{
       // Dev-only override (Settings › Developer): offer only the instant dummy
       // workflows, so a verification run can't wander into a real model.
       if (dummyWorkflowsOnly()) return DEV_PRESET_NAMES.has(p.name)
+      // Without it a real run must not land on a placeholder image.
+      if (DEV_PRESET_NAMES.has(p.name)) return false
       // Honour the per-workflow sub-checkboxes (Settings › Built-in tools).
       return textInference.isWorkflowPresetEnabled(p.name)
     })

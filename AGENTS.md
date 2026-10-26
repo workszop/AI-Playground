@@ -1028,9 +1028,11 @@ Notes:
   `electron/artifact/runner.ts`)
   once per session. Its `Load Image` node is deliberately unconsumed: it keeps the
   "needs a source image" contract (and exercises the upload path) without being executed.
-- `toolInstructions` tell the model these are test-only workflows, so ask for them explicitly
-  ("using only the dummy test workflows, …"). Delegation puts them behind the single `media`
-  tool, so one request can chain image → 3D.
+- The chat and agent media tools offer the dummies only while **Settings → Developer → Use
+  dummy media workflows** is on, and then offer nothing else; with it off they see only real
+  workflows, so a real run can never land on a placeholder. Image Gen / Image Edit still list
+  them for picking by hand. Delegation puts them behind the single `media` tool, so one
+  request can chain image → 3D.
 
 ### Verifying the Game Agent preset (game library)
 
@@ -1089,9 +1091,9 @@ on Windows, `~/AI-Playground/games` elsewhere — and every game folder holds it
   decoded as UTF-8 into mojibake, and the model must be registered with `input: ['text','image']`
   (`modelInput` in `piAgentManager.ts`, from `textInference.modelSupportsVision`) or Pi drops the
   image and tells the model it cannot see images.
-- Smoke it in seconds by asking for a trivial game and naming the `Dummy Image (test)`
-  workflow for the cover, then Save → Play. A 9B model often stops after generating the
-  image; one follow-up ("finish the library card") exercises the `game` tool.
+- Smoke it in seconds by turning on **Use dummy media workflows** (Settings → Developer) and
+  asking for a trivial game with a cover, then Save → Play. A 9B model often stops after
+  generating the image; one follow-up ("finish the library card") exercises the `game` tool.
 - A session belongs to the preset it was held with (`AgentSessionRecord.presetName`). Game
   Agent and Quick Coder share the games library, so the Sessions panel lists both when either
   is active; resuming one still switches back to the preset it was held with. The folder-picking

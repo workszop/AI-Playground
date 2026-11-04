@@ -45,7 +45,7 @@ export type ChatAskBody =
 export type ChatAskPayload = ChatAskBody & { requestId: string }
 
 /** Phases a long request reports while it runs, for the tool's activity. */
-export type ChatAskPhase = 'loading-model' | 'generating'
+export type ChatAskPhase = 'checking' | 'loading-model' | 'generating'
 
 export type ChatAnswerPayload =
   | { requestId: string; progress: true; phase?: ChatAskPhase }

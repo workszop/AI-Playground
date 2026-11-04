@@ -8,6 +8,7 @@ import { requestDownload } from '@/assets/js/permissions/permissions'
 import * as toast from '@/assets/js/toast'
 import { createAppError } from '../errors/appError'
 import { qwen3TtsFetch } from '@/lib/loopbackAuth'
+import { checkSpeechInput, throwIfStopped } from '@/assets/js/speech/speechInputGuard'
 import { resolveTtsSpeakerLabel } from '@/lib/ttsSpeakerLabel'
 import { voicePreviewSentence } from '@/lib/ttsVoicePreview'
 import { seedForVoice, stableVoiceSeed } from '@/lib/ttsVoiceSeed'
@@ -226,6 +227,8 @@ export const useQwen3TextToSpeech = defineStore('qwen3TextToSpeech', () => {
      * voice. Set when creating or re-saving a voice — see the clone routing below.
      */
     designNewVoice?: boolean
+    /** Stop: no step runs after it fires, and a running request is abandoned. */
+    signal?: AbortSignal
   }): Promise<Qwen3TtsSynthesizeResult> {
     let mode = args.mode ?? defaultMode.value
     let language = args.language ?? defaultLanguage.value
@@ -288,9 +291,13 @@ export const useQwen3TextToSpeech = defineStore('qwen3TextToSpeech', () => {
         ? { path: saved.previewFilePath, text: voicePreviewSentence(saved.name) }
         : undefined
     if (cloneRef) mode = 'voice_clone'
+    // Kids-safe build: no audio without a passed check of the words and the
+    // description (a verdict the caller already got is reused, not re-asked).
+    await checkSpeechInput([args.text, resolvedInstruct], args.signal)
     // Only the model for the resolved mode is required.
     await ensureModelInstalled(mode)
     const baseUrl = await ensureBackendRunning()
+    throwIfStopped(args.signal)
     const body = {
       text: args.text,
       language,
@@ -305,6 +312,7 @@ export const useQwen3TextToSpeech = defineStore('qwen3TextToSpeech', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: args.signal,
     })
     const payload = (await response.json()) as Qwen3TtsApiResponse<Qwen3TtsSynthesizeResult>
     if (!response.ok || payload.code !== 0 || !payload.data) {

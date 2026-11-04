@@ -4,7 +4,8 @@ import { saveGeneratedAudioFile } from '../persist/audioFiles'
 import { filePartToBase64, findLatestAttachment } from './chatFileParts'
 import { trackChatToolActivity, updateChatToolActivity } from './chatToolActivity'
 import { askRenderer } from './chatAsk'
-import type { SpeechClipPayload, SpeechVoiceSelection } from '@/types/chatRequests'
+import type { ChatAskPhase, SpeechClipPayload, SpeechVoiceSelection } from '@/types/chatRequests'
+import { TTS_STOPPED_MESSAGE } from '@/lib/kidsSafeMessages'
 
 /**
  * Main-side bodies for `synthesizeTextToSpeech` and `transcribeAudio`.
@@ -18,8 +19,11 @@ import type { SpeechClipPayload, SpeechVoiceSelection } from '@/types/chatReques
 
 export const CHAT_SPEECH_TOOLS = new Set(['synthesizeTextToSpeech', 'transcribeAudio'])
 
-/** A Stop during synthesis (or its kids-safe input check) is reported as this, not an error. */
-export const SPEECH_STOPPED_MESSAGE = 'Text to Speech was stopped.'
+const SPEECH_PHASE_LABELS: Record<ChatAskPhase, string> = {
+  checking: 'Checking text…',
+  'loading-model': 'Loading voice model…',
+  generating: 'Generating audio file…',
+}
 
 export type SynthesizeSpeechOutput = {
   ok: boolean
@@ -64,10 +68,10 @@ async function synthesize(options: {
     return await trackChatToolActivity(
       {
         category: 'tools',
-        // Two visible phases: loading the model (slow on the first call, and
-        // where the install prompt lands) then writing the audio. The engine
-        // reports the switch back over the request's progress pings.
-        label: 'Loading voice model…',
+        // Three visible phases: the kids-safe input check, loading the model
+        // (slow on the first call, and where the install prompt lands), then
+        // writing the audio. The engine reports each switch over progress pings.
+        label: SPEECH_PHASE_LABELS.checking,
         conversationKey: options.conversationKey,
       },
       async (activityId) => {
@@ -86,10 +90,7 @@ async function synthesize(options: {
           },
           {
             onPhase: (phase) =>
-              updateChatToolActivity(activityId, {
-                label:
-                  phase === 'loading-model' ? 'Loading voice model…' : 'Generating audio file…',
-              }),
+              updateChatToolActivity(activityId, { label: SPEECH_PHASE_LABELS[phase] }),
             abortSignal: options.abortSignal,
           },
         )
@@ -110,7 +111,7 @@ async function synthesize(options: {
       },
     )
   } catch (error) {
-    if (options.abortSignal?.aborted) return { ok: false, message: SPEECH_STOPPED_MESSAGE }
+    if (options.abortSignal?.aborted) return { ok: false, message: TTS_STOPPED_MESSAGE }
     return { ok: false, message: error instanceof Error ? error.message : String(error) }
   }
 }

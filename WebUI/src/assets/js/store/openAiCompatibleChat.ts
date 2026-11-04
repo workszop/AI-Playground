@@ -39,6 +39,7 @@ import { dynamicTool, jsonSchema } from '@ai-sdk/provider-utils'
 import {
   readyTranscriptionForInput,
   SpeechInputBlockedError,
+  type SpeechClipPhase,
   synthesizeClip,
   synthesizeToolAvailable,
   saveSpeechClip,
@@ -47,12 +48,17 @@ import {
 } from '../speech/speechIO'
 import * as toast from '@/assets/js/toast'
 import { buildTtsAudioFileName, conversationLabelForTtsFile } from '@/lib/ttsAudioFileName'
+import { TTS_STOPPED_MESSAGE } from '@/lib/kidsSafeMessages'
 
 // Web tools that share browseWeb's single "Browse the web" enablement toggle:
 // they all act on the same background browser browseWeb drives.
 const WEB_COMPANION_TOOLS = new Set(['searchWeb', 'interactWithWebPage', 'screenshotWebPage'])
 
-const TTS_STOPPED_MESSAGE = 'Text to Speech was stopped.'
+const TTS_PHASE_LABELS: Record<SpeechClipPhase, string> = {
+  checking: 'Checking text…',
+  'loading-model': 'Loading voice model…',
+  generating: 'Generating audio file…',
+}
 
 /** The audio-less result a TTS turn records when it is blocked, stopped or fails. */
 function failedTtsOutput(message: string) {
@@ -681,15 +687,16 @@ export const useOpenAiCompatibleChat = defineStore(
         fileInput.value = []
       }
 
-      // Surface progress while synthesizing: "Loading voice model…" (first use /
-      // backend start) then "Generating audio file…". The standalone
+      // Surface progress while synthesizing: "Checking text…" (kids-safe input
+      // check), "Loading voice model…" (first use / backend start), then
+      // "Generating audio file…". The standalone
       // ChatActivityIndicator renders this because the last message is the user's
       // (no assistant bubble exists yet). The engine's own phase signal drives the
       // label, so the activity is visible from the first probe.
       const ttsScope = { kind: 'chat' as const, conversationKey: targetKey }
       const ttsActivityId = activities.begin({
         category: 'tools',
-        label: 'Loading voice model…',
+        label: TTS_PHASE_LABELS.checking,
         scope: ttsScope,
       })
 
@@ -715,13 +722,9 @@ export const useOpenAiCompatibleChat = defineStore(
           conversationKey: targetKey,
           conversationLabel: label,
         })
-        activities.update(ttsActivityId, { label: 'Checking text…' })
         const clip = await synthesizeClip({
           text: question,
-          onPhase: (phase) =>
-            activities.update(ttsActivityId, {
-              label: phase === 'loading-model' ? 'Loading voice model…' : 'Generating audio file…',
-            }),
+          onPhase: (phase) => activities.update(ttsActivityId, { label: TTS_PHASE_LABELS[phase] }),
           signal: stopController.signal,
         })
         if (stopController.signal.aborted) throw stopController.signal.reason

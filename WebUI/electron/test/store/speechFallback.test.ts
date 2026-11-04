@@ -74,6 +74,25 @@ vi.mock('@/assets/js/toast', () => ({
   info: vi.fn(),
 }))
 
+const checkSpeechInputMock = vi.fn(
+  async (_parts: (string | undefined)[], _signal?: AbortSignal) => {},
+)
+vi.mock('@/assets/js/speech/speechInputGuard', () => ({
+  checkSpeechInput: checkSpeechInputMock,
+  throwIfStopped: (signal?: AbortSignal) => {
+    if (signal?.aborted) throw new DOMException('stopped', 'AbortError')
+  },
+}))
+
+const synthesizeSpeechMock = vi.fn(async (_text: string, _endpoint: unknown) => ({
+  bytes: new Uint8Array([1]),
+  mediaType: 'audio/wav',
+}))
+vi.mock('@/lib/synthesizeSpeech', () => ({
+  synthesizeSpeech: synthesizeSpeechMock,
+  bytesToBase64: () => 'AQ==',
+}))
+
 vi.mock('@/assets/js/demoAwareStorage', () => ({
   demoAwareStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
 }))
@@ -168,6 +187,36 @@ describe('text-to-speech on the external engine', () => {
 
     expect(startSpeechServer).not.toHaveBeenCalled()
     expect(checkSpeechModelExists).not.toHaveBeenCalled()
+  })
+
+  it('checks the words with the kids-safe guard before making audio', async () => {
+    const tts = await ttsOnExternal()
+
+    await tts.synthesizeToWav('hello')
+
+    expect(checkSpeechInputMock).toHaveBeenCalledWith(['hello'], undefined)
+    expect(synthesizeSpeechMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('makes no audio when the guard blocks the words', async () => {
+    const tts = await ttsOnExternal()
+    checkSpeechInputMock.mockRejectedValueOnce(new Error('Blocked'))
+
+    await expect(tts.synthesizeToWav('bad words')).rejects.toThrow('Blocked')
+
+    expect(synthesizeSpeechMock).not.toHaveBeenCalled()
+  })
+
+  it('makes no audio when stopped after the check', async () => {
+    const tts = await ttsOnExternal()
+    const controller = new AbortController()
+    checkSpeechInputMock.mockImplementationOnce(async () => controller.abort())
+
+    await expect(tts.synthesizeToWav('hello', controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+
+    expect(synthesizeSpeechMock).not.toHaveBeenCalled()
   })
 
   it('leaves OVMS alone on startup', async () => {

@@ -89,6 +89,7 @@ vi.mock('@/lib/kernelChatTransport', () => ({
 }))
 
 const { useOpenAiCompatibleChat } = await import('@/assets/js/store/openAiCompatibleChat')
+const { TTS_STOPPED_MESSAGE } = await import('@/lib/kidsSafeMessages')
 
 describe('conversation-scoped chat cancellation', () => {
   beforeEach(() => {
@@ -229,7 +230,7 @@ describe('conversation-scoped chat cancellation', () => {
     await turn
     expect(state.report).not.toHaveBeenCalled()
     expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({
-      output: { ok: false, message: 'Text to Speech was stopped.' },
+      output: { ok: false, message: TTS_STOPPED_MESSAGE },
     })
   })
 
@@ -249,7 +250,7 @@ describe('conversation-scoped chat cancellation', () => {
     finish()
     await turn
     expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({
-      output: { ok: false, message: 'Text to Speech was stopped.', savedFilePath: '' },
+      output: { ok: false, message: TTS_STOPPED_MESSAGE, savedFilePath: '' },
     })
   })
 

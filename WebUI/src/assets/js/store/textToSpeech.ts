@@ -9,6 +9,7 @@ import * as toast from '@/assets/js/toast'
 import { useSetupWizard } from './setupWizard'
 import { useProductMode } from './productMode'
 import { synthesizeSpeech, bytesToBase64 } from '@/lib/synthesizeSpeech'
+import { checkSpeechInput, throwIfStopped } from '@/assets/js/speech/speechInputGuard'
 
 export const SPEECHT5_MODEL_NAME = 'OpenVINO/Kokoro-82M-int8-ov'
 
@@ -233,7 +234,12 @@ export const useTextToSpeech = defineStore('textToSpeech', () => {
    * configured voice, so callers must not assume `selectedKokoroVoice` when
    * reporting what was spoken.
    */
-  async function synthesizeToWav(text: string): Promise<{ audioBase64: string; voice: string }> {
+  async function synthesizeToWav(
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<{ audioBase64: string; voice: string }> {
+    // Kids-safe build: no audio without a passed check (a caller's verdict is reused).
+    await checkSpeechInput([text], signal)
     let endpoint: SpeechEndpoint | null
     if (selectedEngine.value === 'qwen3') {
       // Qwen3 synthesizes through its own backend store (useQwen3TextToSpeech),
@@ -262,6 +268,7 @@ export const useTextToSpeech = defineStore('textToSpeech', () => {
         throw new Error('Kokoro Text To Speech is not available (no OVMS server).')
       }
     }
+    throwIfStopped(signal)
     const { bytes } = await synthesizeSpeech(text, endpoint)
     return { audioBase64: bytesToBase64(bytes), voice: endpoint.voice }
   }

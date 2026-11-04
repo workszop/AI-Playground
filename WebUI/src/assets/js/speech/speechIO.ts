@@ -12,7 +12,7 @@ import {
   synthesizeSpeech,
 } from '@/lib/synthesizeSpeech'
 import { markdownToSpeechText } from '@/lib/markdownToSpeech'
-import { KIDS_GUARD_UNAVAILABLE_MESSAGE } from '@/lib/kidsSafeMessages'
+import { checkSpeechInput, SpeechInputBlockedError, throwIfStopped } from './speechInputGuard'
 import type {
   Qwen3TtsLanguage,
   Qwen3TtsSpeakerId,
@@ -72,49 +72,18 @@ export type SpeechVoiceRequest = {
   rememberAsDefault?: boolean
 }
 
+export type SpeechClipPhase = 'checking' | 'loading-model' | 'generating'
+
 export type SynthesizeClipRequest = {
   text: string
   voice?: SpeechVoiceRequest
   /** Engine phase signal for activity-driven callers (the TTS tool). */
-  onPhase?: (phase: 'loading-model' | 'generating') => void
-  /** Stop: cancels the input check and skips synthesis if it has not started. */
+  onPhase?: (phase: SpeechClipPhase) => void
+  /** Stop: cancels the input check and every later step; a running generation is abandoned. */
   signal?: AbortSignal
 }
 
-/** Thrown when the kids-safe guard blocks speech input; `message` is what to show. */
-export class SpeechInputBlockedError extends Error {}
-
-function abortError(): DOMException {
-  return new DOMException('Text to Speech was stopped', 'AbortError')
-}
-
-/**
- * Kids-safe check of speech input before any audio is made: the words and the
- * voice description, judged by the guard in main. Throws
- * {@link SpeechInputBlockedError} when blocked or when the guard cannot be
- * asked (fail closed), and an AbortError when `signal` stops it.
- */
-export async function checkSpeechInput(
-  parts: (string | undefined)[],
-  signal?: AbortSignal,
-): Promise<void> {
-  if (signal?.aborted) throw abortError()
-  const text = parts.filter((part) => part?.trim()).join('\n')
-  const requestId = crypto.randomUUID()
-  const cancel = () => void window.electronAPI.chat.cancelSpeechInputCheck(requestId)
-  signal?.addEventListener('abort', cancel, { once: true })
-  let result: Awaited<ReturnType<typeof window.electronAPI.chat.checkSpeechInput>>
-  try {
-    result = await window.electronAPI.chat.checkSpeechInput(requestId, text)
-  } catch {
-    if (signal?.aborted) throw abortError()
-    throw new SpeechInputBlockedError(KIDS_GUARD_UNAVAILABLE_MESSAGE)
-  } finally {
-    signal?.removeEventListener('abort', cancel)
-  }
-  if ('cancelled' in result || signal?.aborted) throw abortError()
-  if (result.blocked) throw new SpeechInputBlockedError(result.message)
-}
+export { checkSpeechInput, SpeechInputBlockedError }
 
 /**
  * Interactive STT readiness — may prompt the model-download dialog on first
@@ -180,7 +149,9 @@ export async function synthesizeClip(req: SynthesizeClipRequest): Promise<Speech
   const tts = useTextToSpeech()
   const text = req.text
 
-  // Kids-safe build: every clip a person or a tool asks for passes the guard first.
+  // Kids-safe build: judged before any model load or download prompt. The engine
+  // checks again before it makes audio; that second check reuses this verdict.
+  req.onPhase?.('checking')
   const description =
     tts.selectedEngine === 'qwen3'
       ? useQwen3TextToSpeech().voiceDescriptionFor({
@@ -203,10 +174,12 @@ export async function synthesizeClip(req: SynthesizeClipRequest): Promise<Speech
     }
     // A saved voice always resolves to voice_design; otherwise the given mode.
     const loadMode = voice?.voiceName ? 'voice_design' : voice?.mode
+    throwIfStopped(req.signal)
     req.onPhase?.('loading-model')
     if (!(await qwen3.isModelLoaded(loadMode))) {
       await qwen3.ensureModelLoaded(loadMode)
     }
+    throwIfStopped(req.signal)
     req.onPhase?.('generating')
     const result = await qwen3.synthesize({
       text,
@@ -217,6 +190,7 @@ export async function synthesizeClip(req: SynthesizeClipRequest): Promise<Speech
       voiceName: voice?.voiceName,
       seed: voice?.seed,
       designNewVoice: voice?.designNewVoice,
+      signal: req.signal,
     })
     return {
       audioBase64: result.audioBase64,
@@ -228,14 +202,18 @@ export async function synthesizeClip(req: SynthesizeClipRequest): Promise<Speech
     }
   }
 
+  throwIfStopped(req.signal)
   req.onPhase?.('generating')
-  return await kokoroExternalToolClip(text)
+  return await kokoroExternalToolClip(text, req.signal)
 }
 
 /** Kokoro/external synthesis for the speech tool; may prompt the Kokoro model download. */
-async function kokoroExternalToolClip(text: string): Promise<SpeechClipResult> {
+async function kokoroExternalToolClip(
+  text: string,
+  signal?: AbortSignal,
+): Promise<SpeechClipResult> {
   const tts = useTextToSpeech()
-  const { audioBase64, voice } = await tts.synthesizeToWav(text)
+  const { audioBase64, voice } = await tts.synthesizeToWav(text, signal)
   return {
     audioBase64,
     mediaType: 'audio/wav',

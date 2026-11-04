@@ -129,6 +129,7 @@ const {
   SpeechInputBlockedError,
 } = await import('@/assets/js/speech/speechIO')
 const { KIDS_GUARD_UNAVAILABLE_MESSAGE } = await import('@/lib/kidsSafeMessages')
+const { resetSpeechInputCacheForTest } = await import('@/assets/js/speech/speechInputGuard')
 
 /** A minimal RIFF/WAVE header so `transcribe` takes the no-re-encode path. */
 function wavBlob(): Blob {
@@ -170,6 +171,8 @@ describe('speechIO (Speech I/O adapter)', () => {
       voice: 'af_heart',
       apiKey: '',
     })
+    resetSpeechInputCacheForTest()
+    checkSpeechInputMock.mockReset()
     checkSpeechInputMock.mockResolvedValue({ blocked: false })
     qwenVoiceDescriptionForMock.mockReturnValue(undefined)
     vi.stubGlobal('window', {
@@ -257,7 +260,7 @@ describe('speechIO (Speech I/O adapter)', () => {
         },
         onPhase: (phase) => phases.push(phase),
       })
-      expect(phases).toEqual(['loading-model', 'generating'])
+      expect(phases).toEqual(['checking', 'loading-model', 'generating'])
       expect(qwenIsModelLoadedMock).toHaveBeenCalledWith('custom_voice')
       expect(qwenEnsureModelLoadedMock).toHaveBeenCalledWith('custom_voice')
       expect(qwenSynthesizeMock).toHaveBeenCalledWith(
@@ -386,13 +389,46 @@ describe('speechIO (Speech I/O adapter)', () => {
     })
   })
 
+  describe('synthesizeClip Stop after the check', () => {
+    it('loads no model and makes no audio when stopped after the check', async () => {
+      const controller = new AbortController()
+      checkSpeechInputMock.mockImplementation(async () => {
+        controller.abort()
+        return { blocked: false }
+      })
+      await expect(
+        synthesizeClip({ text: 'hello', signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      expect(qwenIsModelLoadedMock).not.toHaveBeenCalled()
+      expect(qwenSynthesizeMock).not.toHaveBeenCalled()
+    })
+
+    it('makes no audio when stopped while the voice model loads', async () => {
+      const controller = new AbortController()
+      qwenEnsureModelLoadedMock.mockImplementationOnce(async () => controller.abort())
+      await expect(
+        synthesizeClip({ text: 'hello', signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      expect(qwenEnsureModelLoadedMock).toHaveBeenCalled()
+      expect(qwenSynthesizeMock).not.toHaveBeenCalled()
+    })
+
+    it('hands the Stop signal to the Qwen3 engine', async () => {
+      const controller = new AbortController()
+      await synthesizeClip({ text: 'hello', signal: controller.signal })
+      expect(qwenSynthesizeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: controller.signal }),
+      )
+    })
+  })
+
   describe('synthesizeClip (Kokoro / external)', () => {
     it('synthesizes interactively through the selected engine', async () => {
       ttsEngine.value = 'kokoro'
       const phases: string[] = []
       const clip = await synthesizeClip({ text: 'hello', onPhase: (p) => phases.push(p) })
-      expect(phases).toEqual(['generating'])
-      expect(synthesizeToWavMock).toHaveBeenCalledWith('hello')
+      expect(phases).toEqual(['checking', 'generating'])
+      expect(synthesizeToWavMock).toHaveBeenCalledWith('hello', undefined)
       expect(clip).toMatchObject({
         audioBase64: 'Tts9',
         mediaType: 'audio/wav',

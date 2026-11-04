@@ -509,8 +509,11 @@ watch(derivedSeed, (seed) => {
 })
 
 const savingVoice = ref(false)
-const savingPhase = ref<'idle' | 'loading' | 'generating'>('idle')
+const savingPhase = ref<'idle' | 'checking' | 'loading' | 'generating'>('idle')
+/** Stops a running Save & preview check when the panel goes away. */
+let saveController: AbortController | null = null
 const savingVoiceLabel = computed(() => {
+  if (savingPhase.value === 'checking') return 'Checking voice…'
   if (savingPhase.value === 'loading') return 'Loading voice model…'
   if (savingPhase.value === 'generating') return 'Generating preview…'
   return 'Save & preview'
@@ -574,8 +577,11 @@ async function saveCurrentVoice() {
   savingVoice.value = true
   try {
     // Kids-safe build: the preview sentence (it speaks the name) and the description
-    // are judged before any model is fetched or any audio is made.
-    await checkSpeechInput([voicePreviewSentence(name), instruct])
+    // are judged before any model is fetched; synthesize reuses this verdict.
+    saveController = new AbortController()
+    const signal = saveController.signal
+    savingPhase.value = 'checking'
+    await checkSpeechInput([voicePreviewSentence(name), instruct], signal)
     // A created voice needs two checkpoints, neither of them the preset speakers':
     // voice design *invents* it here, and voice cloning *reproduces* it later from
     // the preview. Fetch both now, at the one moment the user is deliberately making
@@ -597,6 +603,7 @@ async function saveCurrentVoice() {
       // Draw a new speaker: without this, re-saving a voice that is currently active
       // would clone its old preview and the rolled seed would appear to do nothing.
       designNewVoice: true,
+      signal,
     })
 
     // One file per voice (overwrite), so re-saving replaces its preview instead of
@@ -615,6 +622,7 @@ async function saveCurrentVoice() {
     resetVoiceForm()
     toast.success(`Saved voice "${name}"`)
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return
     if (error instanceof SpeechInputBlockedError) {
       errors.report(error, {
         category: 'validation',
@@ -633,6 +641,7 @@ async function saveCurrentVoice() {
       surface: 'toast',
     })
   } finally {
+    saveController = null
     savingPhase.value = 'idle'
     savingVoice.value = false
     await refreshModelInstalled()
@@ -679,5 +688,8 @@ function togglePreview(voice: Qwen3TtsSavedVoice) {
   void playPreviewFile(voice.previewFilePath, voice.name)
 }
 
-onUnmounted(stopPreview)
+onUnmounted(() => {
+  stopPreview()
+  saveController?.abort()
+})
 </script>

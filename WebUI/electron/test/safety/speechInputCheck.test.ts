@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../observability/logger', () => ({
-  appLoggerInstance: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}))
+const logger = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }))
+vi.mock('../../observability/logger', () => ({ appLoggerInstance: logger }))
 
-type Verdict = { level: 'safe' | 'unsafe' | 'controversial' | 'unavailable' }
+type Verdict = { level: 'safe' | 'unsafe' | 'controversial' | 'unavailable'; detail?: string }
 const checkKidsPromptMock = vi.fn(
   async (_text: string, _signal?: AbortSignal): Promise<Verdict> => ({ level: 'safe' }),
 )
@@ -45,6 +44,17 @@ describe('checkSpeechInput', () => {
       blocked: true,
       message: 'blocked:unsafe',
     })
+  })
+
+  it('logs why input was blocked, never the text itself', async () => {
+    logger.info.mockClear()
+    checkKidsPromptMock.mockResolvedValue({ level: 'unsafe', detail: 'blocklist' })
+    await checkSpeechInput('r1', 'secret words')
+    expect(logger.info).toHaveBeenCalledWith(
+      'Kids guard blocked speech input (unsafe, blocklist)',
+      'kids-guard',
+    )
+    expect(JSON.stringify(logger.info.mock.calls)).not.toContain('secret words')
   })
 
   it('fails closed when the guard throws', async () => {

@@ -15,7 +15,8 @@ vi.mock('../../persist/audioFiles', () => ({
 const requestSpeechMock = vi.fn()
 vi.mock('../../chat/chatAsk', () => ({ askRenderer: requestSpeechMock }))
 
-const { executeChatSpeechTool, SPEECH_STOPPED_MESSAGE } = await import('../../chat/chatSpeechTools')
+const { executeChatSpeechTool } = await import('../../chat/chatSpeechTools')
+const { TTS_STOPPED_MESSAGE } = await import('@/lib/kidsSafeMessages')
 const { filePartToBase64 } = await import('../../chat/chatFileParts')
 
 const readMediaAsDataUri = vi.fn(async () => 'data:audio/wav;base64,QQ==')
@@ -127,7 +128,7 @@ describe('executeChatSpeechTool', () => {
       abortSignal: controller.signal,
     })
 
-    expect(result).toEqual({ ok: false, message: SPEECH_STOPPED_MESSAGE })
+    expect(result).toEqual({ ok: false, message: TTS_STOPPED_MESSAGE })
     expect(saveGeneratedAudioFileMock).not.toHaveBeenCalled()
   })
 

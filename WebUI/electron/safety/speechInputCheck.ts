@@ -4,22 +4,25 @@
  * it asks over IPC per request and may cancel a check it no longer needs (Stop).
  */
 import { appLoggerInstance } from '../observability/logger'
-import { blockedMessageFor, checkKidsPrompt, isBlocked } from './kidsGuard'
+import { blockedMessageFor, checkKidsPrompt, isBlocked, type KidsGuardVerdict } from './kidsGuard'
 
 const appLogger = appLoggerInstance
 
 export type GuardUiVerdict = { blocked: false } | { blocked: true; message: string }
 export type SpeechInputCheckResult = GuardUiVerdict | { cancelled: true }
 
+function toUiVerdict(verdict: KidsGuardVerdict): GuardUiVerdict {
+  return isBlocked(verdict)
+    ? { blocked: true, message: blockedMessageFor(verdict) }
+    : { blocked: false }
+}
+
 /** A guard verdict as the UI shows it: blocked with its message, or allowed. */
 export async function guardVerdictForUi(
   text: string,
   signal?: AbortSignal,
 ): Promise<GuardUiVerdict> {
-  const verdict = await checkKidsPrompt(text, signal)
-  return isBlocked(verdict)
-    ? { blocked: true, message: blockedMessageFor(verdict) }
-    : { blocked: false }
+  return toUiVerdict(await checkKidsPrompt(text, signal))
 }
 
 const runningChecks = new Map<string, AbortController>()
@@ -33,10 +36,14 @@ export async function checkSpeechInput(
   const controller = new AbortController()
   runningChecks.set(requestId, controller)
   try {
-    const result = await guardVerdictForUi(text, controller.signal)
+    const verdict = await checkKidsPrompt(text, controller.signal)
     if (controller.signal.aborted) return { cancelled: true }
-    if (result.blocked) appLogger.info('Kids guard blocked speech input', 'kids-guard')
-    return result
+    if (isBlocked(verdict)) {
+      // The level and detail (e.g. `blocklist`) say why; the text itself is never logged.
+      const why = verdict.detail ? `${verdict.level}, ${verdict.detail}` : verdict.level
+      appLogger.info(`Kids guard blocked speech input (${why})`, 'kids-guard')
+    }
+    return toUiVerdict(verdict)
   } catch (error) {
     if (controller.signal.aborted) return { cancelled: true }
     appLogger.warn(`Speech input check failed: ${String(error)}`, 'kids-guard')

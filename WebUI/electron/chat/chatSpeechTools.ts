@@ -4,6 +4,7 @@ import { saveGeneratedAudioFile } from '../persist/audioFiles'
 import { filePartToBase64, findLatestAttachment } from './chatFileParts'
 import { trackChatToolActivity, updateChatToolActivity } from './chatToolActivity'
 import { askRenderer } from './chatAsk'
+import { blockedMessageFor, checkKidsPrompt, isBlocked } from '../safety/kidsGuard'
 import type { SpeechClipPayload, SpeechVoiceSelection } from '@/types/chatRequests'
 
 /**
@@ -58,6 +59,11 @@ async function synthesize(options: {
     return { ok: false, message: 'No text to speak.' }
   }
   try {
+    // Kids-safe build: the words to speak and the voice description are judged before
+    // any audio is made, whatever the stream guard later shows of this call.
+    const spoken = [text, args.instruct].filter((part) => typeof part === 'string' && part.trim())
+    const verdict = await checkKidsPrompt(spoken.join('\n'), options.abortSignal)
+    if (isBlocked(verdict)) return { ok: false, message: blockedMessageFor(verdict) }
     return await trackChatToolActivity(
       {
         category: 'tools',

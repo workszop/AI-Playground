@@ -11,6 +11,10 @@ export type ChatDeps = {
   cancelChatTurn: typeof cancelChatTurn
   handleChatAnswer: typeof handleChatAnswer
   summarizeConversationText: typeof summarizeConversationText
+  /** Kids-safe guard verdict for Text to Speech input. */
+  checkSpeechText: (
+    text: string,
+  ) => Promise<{ blocked: false } | { blocked: true; message: string }>
 }
 
 export function buildChatRegistry(deps: ChatDeps) {
@@ -46,5 +50,7 @@ export function buildChatRegistry(deps: ChatDeps) {
         return ipcFail(e)
       }
     },
+    // Text to Speech input goes through the kids-safe guard before any audio is made.
+    'chat:checkSpeechText': (_event, text) => deps.checkSpeechText(String(text ?? '')),
   } satisfies InvokeHandlerMap<ChatInvokeName>
 }

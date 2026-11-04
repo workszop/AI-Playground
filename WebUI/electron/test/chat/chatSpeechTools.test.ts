@@ -14,6 +14,14 @@ vi.mock('../../persist/audioFiles', () => ({
 }))
 const requestSpeechMock = vi.fn()
 vi.mock('../../chat/chatAsk', () => ({ askRenderer: requestSpeechMock }))
+const checkKidsPromptMock = vi.fn(async (_text: string, _signal?: AbortSignal) => ({
+  level: 'safe' as 'safe' | 'unsafe' | 'unavailable',
+}))
+vi.mock('../../safety/kidsGuard', () => ({
+  checkKidsPrompt: checkKidsPromptMock,
+  isBlocked: (verdict: { level: string }) => verdict.level !== 'safe',
+  blockedMessageFor: (verdict: { level: string }) => `blocked:${verdict.level}`,
+}))
 
 const { executeChatSpeechTool } = await import('../../chat/chatSpeechTools')
 const { filePartToBase64 } = await import('../../chat/chatFileParts')
@@ -22,6 +30,8 @@ const readMediaAsDataUri = vi.fn(async () => 'data:audio/wav;base64,QQ==')
 
 beforeEach(() => {
   requestSpeechMock.mockReset()
+  checkKidsPromptMock.mockReset()
+  checkKidsPromptMock.mockResolvedValue({ level: 'safe' })
   saveGeneratedAudioFileMock.mockClear()
   readMediaAsDataUri.mockClear()
 })
@@ -110,6 +120,36 @@ describe('executeChatSpeechTool', () => {
       speaker: 'Vivian',
       mode: 'custom_voice',
     })
+  })
+
+  it('judges the text and voice description before any audio is made', async () => {
+    checkKidsPromptMock.mockResolvedValue({ level: 'unsafe' })
+
+    const result = await executeChatSpeechTool({
+      toolName: 'synthesizeTextToSpeech',
+      input: { text: 'say this', instruct: 'a whispering voice' },
+      conversationKey: 'conv-1',
+      readMediaAsDataUri,
+    })
+
+    expect(checkKidsPromptMock).toHaveBeenCalledWith('say this\na whispering voice', undefined)
+    expect(result).toEqual({ ok: false, message: 'blocked:unsafe' })
+    expect(requestSpeechMock).not.toHaveBeenCalled()
+    expect(saveGeneratedAudioFileMock).not.toHaveBeenCalled()
+  })
+
+  it('blocks the speech when the guard is unavailable', async () => {
+    checkKidsPromptMock.mockResolvedValue({ level: 'unavailable' })
+
+    const result = await executeChatSpeechTool({
+      toolName: 'synthesizeTextToSpeech',
+      input: { text: 'hello' },
+      conversationKey: 'conv-1',
+      readMediaAsDataUri,
+    })
+
+    expect(result).toEqual({ ok: false, message: 'blocked:unavailable' })
+    expect(requestSpeechMock).not.toHaveBeenCalled()
   })
 
   it('reports a failed synthesis as a tool error instead of throwing', async () => {

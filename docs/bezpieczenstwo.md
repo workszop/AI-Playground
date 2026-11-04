@@ -25,6 +25,12 @@ Patch dodaje do aplikacji Intel AI Playground filtry tekstu i obrazów oraz wył
 - Filtr dostały też presety, które go nie miały: warianty OpenVINO, Colorize, Change Face i Upscale.
 - Podgląd na żywo jest wyłączony, bo pokazywał niefiltrowane klatki pośrednie.
 
+## Zamiana tekstu na mowę
+
+- Tekst wpisany w preset Text to Speech jest sprawdzany tak samo jak wiadomość na czacie, zanim ruszy model głosu. Zablokowany tekst nie zamienia się w dźwięk, a w rozmowie pojawia się komunikat o blokadzie.
+- Gdy mowę zamawia model w czacie, sprawdzany jest tekst i opis głosu, zanim powstanie dźwięk.
+- Sam dźwięk nie jest sprawdzany.
+
 ## Ochrona przed obejściem filtra obrazów i filmów
 
 Presety i pliki węzłów ComfyUI leżą w folderze, do którego może pisać każdy użytkownik komputera, więc dałoby się z nich usunąć filtr. Dlatego przed każdym generowaniem aplikacja sprawdza workflow, który wysyła do ComfyUI:
@@ -50,6 +56,6 @@ Ta kontrola odrzuca preset Acer VisionArt, który zapisuje obrazy własnym węz�
 
 - W projektowym zestawie 50 polskich promptów model 4B razem z listą słów przepuścił 0 z 30 szkodliwych i zablokował 1 z 20 niewinnych. Zestaw jest mały, więc te liczby to tylko wskazówka.
 - Próg 0,4 dla obrazów zablokował w teście wszystkie 11 obrazów ze strojami kąpielowymi, bielizną i nagimi postaciami. Zablokował też mniej więcej co piąty niewinny obraz z modelu SD1.5 i 5 z 64 niewinnych zdjęć.
-- Filtr filmów ocenia tylko obraz. Dźwięk z LTX-2.3 i obraz albo film źródłowy podany do image-to-video nie są sprawdzane. Zamiana tekstu na mowę nie jest filtrowana.
+- Filtr filmów ocenia tylko obraz. Dźwięk z LTX-2.3 i obraz albo film źródłowy podany do image-to-video nie są sprawdzane. W zamianie tekstu na mowę sprawdzany jest tylko wpisany tekst, nie powstały dźwięk ani opis głosu z ustawień.
 - Filtr spowalnia czat. Na zintegrowanej grafice Intel Core Ultra 5 135U pierwsza część odpowiedzi pojawia się po około 20 s, a bez filtra po 3–4 s.
 - Aplikacji używaj na osobnym koncie bez uprawnień administratora i z włączoną kontrolą rodzicielską systemu. Administrator może zmienić samą aplikację. Ktoś, kto zna Pythona, mógłby też zmienić samo ComfyUI albo model wykrywający w folderze, do którego każdy ma prawo zapisu.

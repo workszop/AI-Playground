@@ -1754,6 +1754,15 @@ function initEventHandle() {
       cancelChatTurn,
       handleChatAnswer,
       summarizeConversationText,
+      checkSpeechText: async (text) => {
+        const verdict = await checkKidsPrompt(text).catch((error: unknown) => ({
+          level: 'unavailable' as const,
+          detail: String(error),
+        }))
+        if (!isBlocked(verdict)) return { blocked: false as const }
+        appLogger.info(`Kids guard blocked Text to Speech input (${verdict.level})`, 'kids-guard')
+        return { blocked: true as const, message: blockedMessageFor(verdict) }
+      },
     }),
   )
 

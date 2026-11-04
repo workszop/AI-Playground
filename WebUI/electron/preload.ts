@@ -243,6 +243,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     cancelTurn: (conversationKey: string, turnId: string) =>
       invoke('chat:cancelTurn', conversationKey, turnId),
     summarize: (request: ChatSummarizeRequest) => invoke('chat:summarize', request),
+    checkSpeechText: (text: string) => invoke('chat:checkSpeechText', text),
     answer: (payload: ChatAnswerPayload) => invoke('chat:answer', cloneForIpc(payload)),
     onAsk: (callback: (payload: ChatAskPayload) => void) => onPush('chat:ask', callback),
   },

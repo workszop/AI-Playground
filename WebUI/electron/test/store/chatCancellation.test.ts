@@ -8,6 +8,12 @@ const state = vi.hoisted(() => ({
   streams: new Map<string, ReadableStreamDefaultController<UIMessageChunk>>(),
   report: vi.fn((error: unknown) => error),
   ttsPreset: false,
+  synthesizeClip: vi.fn(async () => ({ engine: 'external', audioBase64: '', voice: 'test' })),
+  checkSpeechText: vi.fn(
+    async (_text: string): Promise<{ blocked: false } | { blocked: true; message: string }> => ({
+      blocked: false,
+    }),
+  ),
 }))
 
 vi.mock('@/assets/js/store/conversations', () => ({
@@ -32,6 +38,7 @@ vi.mock('@/assets/js/store/errors', () => ({ useErrors: () => ({ report: state.r
 vi.mock('@/assets/js/store/activities', () => ({
   useActivities: () => ({
     begin: () => 'activity',
+    update: vi.fn(),
     end: vi.fn(),
     endScope: vi.fn(),
     track: (_options: unknown, run: () => unknown) => run(),
@@ -59,7 +66,7 @@ vi.mock('@/assets/js/tools/comfyUiImageEdit', () => ({
 }))
 vi.mock('@/assets/js/speech/speechIO', () => ({
   readyTranscriptionForInput: vi.fn(),
-  synthesizeClip: async () => ({ engine: 'external', audioBase64: '', voice: 'test' }),
+  synthesizeClip: state.synthesizeClip,
   synthesizeToolAvailable: () => false,
   saveSpeechClip: async () => '/tmp/speech.wav',
   transcribe: vi.fn(),
@@ -89,6 +96,9 @@ describe('conversation-scoped chat cancellation', () => {
     state.streams.clear()
     state.report.mockClear()
     state.ttsPreset = false
+    state.synthesizeClip.mockClear()
+    state.checkSpeechText.mockReset()
+    state.checkSpeechText.mockResolvedValue({ blocked: false })
     const conversationList: Record<string, unknown[]> = { local: [], remote: [] }
     state.conversations = reactive({
       activeKey: 'local',
@@ -100,7 +110,10 @@ describe('conversation-scoped chat cancellation', () => {
       updateConversation: vi.fn(),
     })
     vi.stubGlobal('window', {
-      electronAPI: { getKernelSnapshot: async () => ({ state: { chatTurns: [] } }) },
+      electronAPI: {
+        getKernelSnapshot: async () => ({ state: { chatTurns: [] } }),
+        chat: { checkSpeechText: state.checkSpeechText },
+      },
     })
   })
 
@@ -172,6 +185,57 @@ describe('conversation-scoped chat cancellation', () => {
     expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({
       type: 'tool-synthesizeTextToSpeech',
       output: { ok: true },
+    })
+  })
+
+  it('checks the typed text before synthesizing speech', async () => {
+    state.ttsPreset = true
+    const chat = useOpenAiCompatibleChat()
+    await chat.generate('Read this aloud')
+    expect(state.checkSpeechText).toHaveBeenCalledWith('Read this aloud')
+    expect(state.synthesizeClip).toHaveBeenCalledTimes(1)
+    expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({ output: { ok: true } })
+  })
+
+  it('shows the blocked message and makes no audio when the guard blocks the text', async () => {
+    state.ttsPreset = true
+    state.checkSpeechText.mockResolvedValue({ blocked: true, message: 'Blocked by the guard' })
+    const chat = useOpenAiCompatibleChat()
+    await chat.generate('something unsafe')
+    expect(state.synthesizeClip).not.toHaveBeenCalled()
+    expect(state.report).not.toHaveBeenCalled()
+    const messages = chat.getMessagesForKey('local')
+    expect(messages).toHaveLength(2)
+    expect(messages?.[1].parts[0]).toMatchObject({
+      type: 'tool-synthesizeTextToSpeech',
+      output: { ok: false, message: 'Blocked by the guard', savedFilePath: '' },
+    })
+  })
+
+  it('blocks the text when the guard cannot be reached', async () => {
+    state.ttsPreset = true
+    state.checkSpeechText.mockRejectedValue(new Error('ipc gone'))
+    const chat = useOpenAiCompatibleChat()
+    await chat.generate('Read this aloud')
+    expect(state.synthesizeClip).not.toHaveBeenCalled()
+    expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({
+      output: { ok: false, message: expect.stringContaining('safety filter is not available') },
+    })
+  })
+
+  it('checks the text again when speech is regenerated', async () => {
+    state.ttsPreset = true
+    state.checkSpeechText.mockResolvedValue({ blocked: true, message: 'Blocked by the guard' })
+    const history = state.conversations.conversationList as Record<string, unknown[]>
+    history.local = [
+      { id: 'question', role: 'user', parts: [{ type: 'text', text: 'Read this aloud' }] },
+      { id: 'audio', role: 'assistant', parts: [] },
+    ]
+    const chat = useOpenAiCompatibleChat()
+    await chat.regenerate('audio')
+    expect(state.synthesizeClip).not.toHaveBeenCalled()
+    expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({
+      output: { ok: false, message: 'Blocked by the guard' },
     })
   })
 })

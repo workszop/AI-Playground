@@ -367,4 +367,4 @@ Aplikacja kopiuje presety do folderu z prawem zapisu tylko wtedy, gdy zmienia si
 2. Usuń plik `.aipg-seed-version` z folderu zasobów: `C:\Users\Public\AI Playground\resources` przy instalacji ze współdzieleniem, w przeciwnym razie `%LOCALAPPDATA%\ai-playground\resources` na koncie użytkownika.
 3. Uruchom aplikację. Skopiuje dostarczone presety i pliki węzłów na miejsce starych. Pobrane modele zostają.
 
-Pozostałe ograniczenia (dźwięk filmów i mowa nie są filtrowane, żaden filtr nie jest doskonały) opisuje [KIDS-SAFE.md](KIDS-SAFE.md).
+Pozostałe ograniczenia (dźwięk filmów i wygenerowana mowa nie są sprawdzane, żaden filtr nie jest doskonały) opisuje [KIDS-SAFE.md](KIDS-SAFE.md).

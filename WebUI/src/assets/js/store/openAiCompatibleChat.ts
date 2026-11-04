@@ -51,11 +51,21 @@ import { buildTtsAudioFileName, conversationLabelForTtsFile } from '@/lib/ttsAud
 // they all act on the same background browser browseWeb drives.
 const WEB_COMPANION_TOOLS = new Set(['searchWeb', 'interactWithWebPage', 'screenshotWebPage'])
 
+// ─── Kids-safe Text to Speech input check ───
+/** Shown when the guard cannot be asked at all; main returns its own messages otherwise. */
+const SPEECH_GUARD_UNAVAILABLE_MESSAGE =
+  'Filtr bezpieczeństwa nie działa, więc ta prośba została zablokowana.\n\n' +
+  'The safety filter is not available, so this request was blocked.'
+
+/** Thrown inside a TTS turn when the guard blocks the typed text. */
+class SpeechTextBlockedError extends Error {}
+
 // Map opaque GPU/driver faults from the local inference backend to an actionable
 // hint. A Vulkan `ErrorDeviceLost` (a.k.a. device-lost / TDR reset) means the GPU
 // was torn down mid-decode — almost always a driver-level fault on Intel Arc
 // (Battlemage / B-series), not user error. Surface what actually fixes it instead
 // of leaving the raw `vk::Device::getFenceStatus: ErrorDeviceLost` string alone.
+
 export function inferenceFailureHint(message: string): string | null {
   const lower = message.toLowerCase()
   if (
@@ -640,6 +650,16 @@ export const useOpenAiCompatibleChat = defineStore(
      * chat renders a ChatTtsToolResult audio bubble. Voice/language/mode come from
      * the shared qwen3TextToSpeech store (edited in SettingsTts).
      */
+    /** Kids-safe guard verdict for Text to Speech input; any failure blocks (fail closed). */
+    async function speechTextBlockedMessage(text: string): Promise<string | null> {
+      try {
+        const verdict = await window.electronAPI.chat.checkSpeechText(text)
+        return verdict.blocked ? verdict.message : null
+      } catch {
+        return SPEECH_GUARD_UNAVAILABLE_MESSAGE
+      }
+    }
+
     async function synthesizeDirect(
       question: string,
       targetKey: string,
@@ -692,6 +712,10 @@ export const useOpenAiCompatibleChat = defineStore(
       }
       let modelLabel = ''
       try {
+        activities.update(ttsActivityId, { label: 'Checking text…' })
+        const blockedMessage = await speechTextBlockedMessage(question)
+        if (blockedMessage) throw new SpeechTextBlockedError(blockedMessage)
+        activities.update(ttsActivityId, { label: 'Loading voice model…' })
         const label = conversationLabelForTtsFile({
           conversationKey: targetKey,
           messages: getMessagesForKey(targetKey),
@@ -736,13 +760,17 @@ export const useOpenAiCompatibleChat = defineStore(
           }
         }
       } catch (error) {
-        errors.report(error, {
-          category: 'inference',
-          code: 'inference/tts-failed',
-          userMessage: `Text To Speech failed: ${extractMessage(error)}`,
-          surface: opts.sideChannel ? 'silent' : 'toast',
-          context: { conversationKey: targetKey },
-        })
+        // A blocked text is the turn's result, not a failure: no toast, just the message.
+        const blocked = error instanceof SpeechTextBlockedError
+        if (!blocked) {
+          errors.report(error, {
+            category: 'inference',
+            code: 'inference/tts-failed',
+            userMessage: `Text To Speech failed: ${extractMessage(error)}`,
+            surface: opts.sideChannel ? 'silent' : 'toast',
+            context: { conversationKey: targetKey },
+          })
+        }
         // Fall through and record the failure as the turn's result rather than
         // returning here. A toast is the only thing this path used to leave behind,
         // and it fades — so a synthesis that died in the sidecar (an Intel XPU
@@ -750,10 +778,12 @@ export const useOpenAiCompatibleChat = defineStore(
         // the user's message with nothing under it and no way to tell whether it had
         // failed or was still working. ChatTtsToolResult already renders `ok: false`
         // as an error line; nothing had ever produced one.
-        const hint = inferenceFailureHint(extractMessage(error))
+        const hint = blocked ? null : inferenceFailureHint(extractMessage(error))
         output = {
           ok: false,
-          message: `Text To Speech failed: ${extractMessage(error)}${hint ? ` — ${hint}` : ''}`,
+          message: blocked
+            ? (error as Error).message
+            : `Text To Speech failed: ${extractMessage(error)}${hint ? ` — ${hint}` : ''}`,
           savedFilePath: '',
           speaker: '',
           language: '',

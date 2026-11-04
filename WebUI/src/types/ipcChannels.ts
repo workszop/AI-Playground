@@ -381,6 +381,13 @@ export const CHANNELS = {
     args: [] as unknown as readonly [ChatSummarizeRequest],
     result: null as unknown as IpcDataResult<string>,
   },
+  /** Kids-safe guard check of text typed for Text to Speech, before any audio is made. */
+  'chat:checkSpeechText': {
+    kind: 'invoke',
+    owner: 'main',
+    args: [] as unknown as readonly [string],
+    result: null as unknown as { blocked: false } | { blocked: true; message: string },
+  },
   /** The renderer's answer to a `chat:ask` question, keyed by requestId. */
   'chat:answer': {
     kind: 'invoke',

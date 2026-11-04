@@ -243,9 +243,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     cancelTurn: (conversationKey: string, turnId: string) =>
       invoke('chat:cancelTurn', conversationKey, turnId),
     summarize: (request: ChatSummarizeRequest) => invoke('chat:summarize', request),
-    checkSpeechText: (text: string) => invoke('chat:checkSpeechText', text),
+    checkSpeechInput: (requestId: string, text: string) =>
+      invoke('chat:checkSpeechInput', requestId, text),
+    cancelSpeechInputCheck: (requestId: string) => invoke('chat:cancelSpeechInputCheck', requestId),
     answer: (payload: ChatAnswerPayload) => invoke('chat:answer', cloneForIpc(payload)),
     onAsk: (callback: (payload: ChatAskPayload) => void) => onPush('chat:ask', callback),
+    onAskCancel: (callback: (payload: { requestId: string }) => void) =>
+      onPush('chat:askCancel', callback),
   },
   conversations: {
     bootstrap: () => invoke('conversations:bootstrap'),

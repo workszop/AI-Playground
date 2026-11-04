@@ -36,6 +36,12 @@ export function askRenderer<T>(
     // give: the renderer settles its own card, and a late answer finds no entry.
     const onAbort = () => {
       pending.delete(requestId)
+      // Let the renderer stop the work too (a speech input check, a synthesis not yet begun).
+      try {
+        if (!win.isDestroyed()) typedSend(win.webContents, 'chat:askCancel', { requestId })
+      } catch {
+        // The window is going away; nothing is left to stop.
+      }
       reject(new Error('The turn was cancelled'))
     }
     options.abortSignal?.addEventListener('abort', onAbort, { once: true })

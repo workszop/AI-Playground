@@ -58,6 +58,20 @@ describe('chatAsk', () => {
     expect(() => handleChatAnswer({ requestId: lastRequestId(), result: true })).not.toThrow()
   })
 
+  it('tells the renderer to stop the work when the turn is cancelled', async () => {
+    const controller = new AbortController()
+    const answer = askRenderer(
+      { kind: 'speech-synthesize', text: 'hello', voice: {} },
+      { abortSignal: controller.signal },
+    )
+    const requestId = lastRequestId()
+
+    controller.abort()
+
+    await expect(answer).rejects.toThrow(/cancelled/i)
+    expect(sent.at(-1)).toEqual({ channel: 'chat:askCancel', payload: { requestId } })
+  })
+
   it('refuses before sending when the turn is already cancelled', async () => {
     await expect(
       askRenderer(

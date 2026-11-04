@@ -3,6 +3,7 @@ import { ipcFail } from '../typedIpc'
 import type { handleChatAnswer } from '../../chat/chatAsk'
 import type { summarizeConversationText } from '../../chat/chatSummarize'
 import type { cancelChatTurn, resumeChatTurn, submitChatTurn } from '../../chat/turnEngine'
+import type { cancelSpeechInputCheck, checkSpeechInput } from '../../safety/speechInputCheck'
 
 /** The turn-engine and ask seams the five chat handlers close over. */
 export type ChatDeps = {
@@ -11,10 +12,8 @@ export type ChatDeps = {
   cancelChatTurn: typeof cancelChatTurn
   handleChatAnswer: typeof handleChatAnswer
   summarizeConversationText: typeof summarizeConversationText
-  /** Kids-safe guard verdict for Text to Speech input. */
-  checkSpeechText: (
-    text: string,
-  ) => Promise<{ blocked: false } | { blocked: true; message: string }>
+  checkSpeechInput: typeof checkSpeechInput
+  cancelSpeechInputCheck: typeof cancelSpeechInputCheck
 }
 
 export function buildChatRegistry(deps: ChatDeps) {
@@ -50,7 +49,11 @@ export function buildChatRegistry(deps: ChatDeps) {
         return ipcFail(e)
       }
     },
-    // Text to Speech input goes through the kids-safe guard before any audio is made.
-    'chat:checkSpeechText': (_event, text) => deps.checkSpeechText(String(text ?? '')),
+    // Speech input (words and voice description) is judged before any audio is made.
+    'chat:checkSpeechInput': (_event, requestId, text) =>
+      deps.checkSpeechInput(String(requestId), String(text ?? '')),
+    'chat:cancelSpeechInputCheck': (_event, requestId) => {
+      deps.cancelSpeechInputCheck(String(requestId))
+    },
   } satisfies InvokeHandlerMap<ChatInvokeName>
 }

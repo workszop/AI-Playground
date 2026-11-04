@@ -304,6 +304,7 @@ import { useProductMode } from '@/assets/js/store/productMode'
 import { useBackendServices } from '@/assets/js/store/backendServices'
 import { useDialogStore } from '@/assets/js/store/dialogs'
 import { useErrors } from '@/assets/js/store/errors'
+import { checkSpeechInput, SpeechInputBlockedError } from '@/assets/js/speech/speechIO'
 import * as toast from '@/assets/js/toast'
 import { stableVoiceSeed } from '@/lib/ttsVoiceSeed'
 import { voicePreviewFileName, voicePreviewSentence } from '@/lib/ttsVoicePreview'
@@ -572,6 +573,9 @@ async function saveCurrentVoice() {
 
   savingVoice.value = true
   try {
+    // Kids-safe build: the preview sentence (it speaks the name) and the description
+    // are judged before any model is fetched or any audio is made.
+    await checkSpeechInput([voicePreviewSentence(name), instruct])
     // A created voice needs two checkpoints, neither of them the preset speakers':
     // voice design *invents* it here, and voice cloning *reproduces* it later from
     // the preview. Fetch both now, at the one moment the user is deliberately making
@@ -611,6 +615,15 @@ async function saveCurrentVoice() {
     resetVoiceForm()
     toast.success(`Saved voice "${name}"`)
   } catch (error) {
+    if (error instanceof SpeechInputBlockedError) {
+      errors.report(error, {
+        category: 'validation',
+        code: 'inference/tts-blocked',
+        userMessage: error.message,
+        surface: 'toast',
+      })
+      return
+    }
     // A cancelled model download is a decision, not a failure.
     if (error instanceof Error && /cancel/i.test(error.message)) return
     errors.report(error, {

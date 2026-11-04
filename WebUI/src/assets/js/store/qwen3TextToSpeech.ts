@@ -193,6 +193,20 @@ export const useQwen3TextToSpeech = defineStore('qwen3TextToSpeech', () => {
     }
   }
 
+  /**
+   * The voice description a synthesis with these arguments sends to the engine:
+   * a saved voice's description, the given one, or (voice design) the default.
+   */
+  function voiceDescriptionFor(args: {
+    mode?: Qwen3TtsSynthesisMode
+    voiceName?: string
+    instruct?: string
+  }): string | undefined {
+    if (args.voiceName) return resolveVoice(args.voiceName)?.instruct
+    const mode = args.mode ?? defaultMode.value
+    return args.instruct ?? (mode === 'voice_design' ? defaultInstruct.value : undefined)
+  }
+
   async function synthesize(args: {
     text: string
     language?: Qwen3TtsLanguage
@@ -231,8 +245,7 @@ export const useQwen3TextToSpeech = defineStore('qwen3TextToSpeech', () => {
       saved = resolveVoice(defaultVoiceName.value)
     }
     // For voice_design fall back to the saved description when the caller omits one.
-    const resolvedInstruct =
-      instruct ?? (mode === 'voice_design' ? defaultInstruct.value : undefined)
+    const resolvedInstruct = voiceDescriptionFor({ mode, instruct })
     // Voice-design ignores the preset speaker id; label with the saved voice name
     // instead of the leftover custom_voice default.
     const speaker = resolveTtsSpeakerLabel({
@@ -439,6 +452,7 @@ export const useQwen3TextToSpeech = defineStore('qwen3TextToSpeech', () => {
     defaultVoiceName,
     savedVoices,
     synthesize,
+    voiceDescriptionFor,
     saveWavToDisk,
     ensureBackendRunning,
     ensureModelInstalled,

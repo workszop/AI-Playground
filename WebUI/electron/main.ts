@@ -61,17 +61,16 @@ import {
   LLAMACPP_DEFAULT_PARAMETERS,
   LlamaCppBackendService,
 } from './adapters/backends/llamaCppBackendService'
-import {
-  blockedMessageFor,
-  checkKidsPrompt,
-  isBlocked,
-  kidsGuardChecksActive,
-  setKidsGuardDeps,
-} from './safety/kidsGuard'
+import { kidsGuardChecksActive, setKidsGuardDeps } from './safety/kidsGuard'
 import { collectGuardFacts, memoizeUntilRejected } from './safety/guardFacts'
 import { planGuardPlacements } from './safety/guardPlacement'
 import { readCpuTopology } from './safety/cpuTopology'
 import { restoreSafetyCheckerNode } from './safety/imageFilter'
+import {
+  cancelSpeechInputCheck,
+  checkSpeechInput,
+  guardVerdictForUi,
+} from './safety/speechInputCheck'
 import { filterPartnerPresets, updateIntelPresets } from './adapters/updateIntelPresets.ts'
 import {
   invalidatePresetCatalog,
@@ -1471,12 +1470,7 @@ function wireArtifactRunner(settings: LocalSettings): void {
     restartChatBackend: reloadLastChatBackend,
     chatRequestsOpen: () =>
       chatInferenceStreamsActive() + piAgentCallsActive() + kidsGuardChecksActive(),
-    checkPrompt: async (prompt, signal) => {
-      const verdict = await checkKidsPrompt(prompt, signal)
-      return isBlocked(verdict)
-        ? { blocked: true, message: blockedMessageFor(verdict) }
-        : { blocked: false }
-    },
+    checkPrompt: guardVerdictForUi,
   })
 }
 
@@ -1754,15 +1748,8 @@ function initEventHandle() {
       cancelChatTurn,
       handleChatAnswer,
       summarizeConversationText,
-      checkSpeechText: async (text) => {
-        const verdict = await checkKidsPrompt(text).catch((error: unknown) => ({
-          level: 'unavailable' as const,
-          detail: String(error),
-        }))
-        if (!isBlocked(verdict)) return { blocked: false as const }
-        appLogger.info(`Kids guard blocked Text to Speech input (${verdict.level})`, 'kids-guard')
-        return { blocked: true as const, message: blockedMessageFor(verdict) }
-      },
+      checkSpeechInput,
+      cancelSpeechInputCheck,
     }),
   )
 

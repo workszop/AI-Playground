@@ -2,6 +2,7 @@
 .idea
 .vscode/
 .opencode/
+.codex/
 node_modules/
 **/.vite/
 env/
@@ -32,6 +33,7 @@ llama-cpp-env/
 LlamaCPP/
 OpenVINO/ovms
 OpenVINO/ovms.zip
+OpenVINO/installed-version.json
 *env_tmp/
 *service_tmp/
 *-env/

@@ -38,6 +38,7 @@ import { JSONSchema7 } from '@ai-sdk/provider'
 import { dynamicTool, jsonSchema } from '@ai-sdk/provider-utils'
 import {
   readyTranscriptionForInput,
+  SpeechInputBlockedError,
   synthesizeClip,
   synthesizeToolAvailable,
   saveSpeechClip,
@@ -51,21 +52,18 @@ import { buildTtsAudioFileName, conversationLabelForTtsFile } from '@/lib/ttsAud
 // they all act on the same background browser browseWeb drives.
 const WEB_COMPANION_TOOLS = new Set(['searchWeb', 'interactWithWebPage', 'screenshotWebPage'])
 
-// ─── Kids-safe Text to Speech input check ───
-/** Shown when the guard cannot be asked at all; main returns its own messages otherwise. */
-const SPEECH_GUARD_UNAVAILABLE_MESSAGE =
-  'Filtr bezpieczeństwa nie działa, więc ta prośba została zablokowana.\n\n' +
-  'The safety filter is not available, so this request was blocked.'
+const TTS_STOPPED_MESSAGE = 'Text to Speech was stopped.'
 
-/** Thrown inside a TTS turn when the guard blocks the typed text. */
-class SpeechTextBlockedError extends Error {}
+/** The audio-less result a TTS turn records when it is blocked, stopped or fails. */
+function failedTtsOutput(message: string) {
+  return { ok: false, message, savedFilePath: '', speaker: '', language: '', mode: '' }
+}
 
 // Map opaque GPU/driver faults from the local inference backend to an actionable
 // hint. A Vulkan `ErrorDeviceLost` (a.k.a. device-lost / TDR reset) means the GPU
 // was torn down mid-decode — almost always a driver-level fault on Intel Arc
 // (Battlemage / B-series), not user error. Surface what actually fixes it instead
 // of leaving the raw `vk::Device::getFenceStatus: ErrorDeviceLost` string alone.
-
 export function inferenceFailureHint(message: string): string | null {
   const lower = message.toLowerCase()
   if (
@@ -643,6 +641,9 @@ export const useOpenAiCompatibleChat = defineStore(
       return result.data
     }
 
+    /** Stop handles for running Text to Speech turns, by conversation. */
+    const ttsStopControllers = new Map<string, AbortController>()
+
     /**
      * Direct Text-to-Speech turn (no LLM). Used when the active preset is a TTS
      * preset: synthesize the typed text with Qwen3-TTS and append the same
@@ -650,16 +651,6 @@ export const useOpenAiCompatibleChat = defineStore(
      * chat renders a ChatTtsToolResult audio bubble. Voice/language/mode come from
      * the shared qwen3TextToSpeech store (edited in SettingsTts).
      */
-    /** Kids-safe guard verdict for Text to Speech input; any failure blocks (fail closed). */
-    async function speechTextBlockedMessage(text: string): Promise<string | null> {
-      try {
-        const verdict = await window.electronAPI.chat.checkSpeechText(text)
-        return verdict.blocked ? verdict.message : null
-      } catch {
-        return SPEECH_GUARD_UNAVAILABLE_MESSAGE
-      }
-    }
-
     async function synthesizeDirect(
       question: string,
       targetKey: string,
@@ -711,11 +702,10 @@ export const useOpenAiCompatibleChat = defineStore(
         mode: string
       }
       let modelLabel = ''
+      // Stop aborts the kids-safe input check, and a clip finished after Stop is dropped.
+      const stopController = new AbortController()
+      ttsStopControllers.set(targetKey, stopController)
       try {
-        activities.update(ttsActivityId, { label: 'Checking text…' })
-        const blockedMessage = await speechTextBlockedMessage(question)
-        if (blockedMessage) throw new SpeechTextBlockedError(blockedMessage)
-        activities.update(ttsActivityId, { label: 'Loading voice model…' })
         const label = conversationLabelForTtsFile({
           conversationKey: targetKey,
           messages: getMessagesForKey(targetKey),
@@ -725,13 +715,16 @@ export const useOpenAiCompatibleChat = defineStore(
           conversationKey: targetKey,
           conversationLabel: label,
         })
+        activities.update(ttsActivityId, { label: 'Checking text…' })
         const clip = await synthesizeClip({
           text: question,
           onPhase: (phase) =>
             activities.update(ttsActivityId, {
               label: phase === 'loading-model' ? 'Loading voice model…' : 'Generating audio file…',
             }),
+          signal: stopController.signal,
         })
+        if (stopController.signal.aborted) throw stopController.signal.reason
         const savedFilePath = await saveSpeechClip(clip.audioBase64, fileName)
         modelLabel =
           clip.engine === 'kokoro'
@@ -760,9 +753,12 @@ export const useOpenAiCompatibleChat = defineStore(
           }
         }
       } catch (error) {
-        // A blocked text is the turn's result, not a failure: no toast, just the message.
-        const blocked = error instanceof SpeechTextBlockedError
-        if (!blocked) {
+        if (error instanceof SpeechInputBlockedError) {
+          // A blocked text is the turn's result, not a failure: no toast, just the message.
+          output = failedTtsOutput(error.message)
+        } else if (stopController.signal.aborted) {
+          output = failedTtsOutput(TTS_STOPPED_MESSAGE)
+        } else {
           errors.report(error, {
             category: 'inference',
             code: 'inference/tts-failed',
@@ -770,27 +766,22 @@ export const useOpenAiCompatibleChat = defineStore(
             surface: opts.sideChannel ? 'silent' : 'toast',
             context: { conversationKey: targetKey },
           })
-        }
-        // Fall through and record the failure as the turn's result rather than
-        // returning here. A toast is the only thing this path used to leave behind,
-        // and it fades — so a synthesis that died in the sidecar (an Intel XPU
-        // `UR_RESULT_ERROR_DEVICE_LOST` mid-generation, say) left the thread showing
-        // the user's message with nothing under it and no way to tell whether it had
-        // failed or was still working. ChatTtsToolResult already renders `ok: false`
-        // as an error line; nothing had ever produced one.
-        const hint = blocked ? null : inferenceFailureHint(extractMessage(error))
-        output = {
-          ok: false,
-          message: blocked
-            ? (error as Error).message
-            : `Text To Speech failed: ${extractMessage(error)}${hint ? ` — ${hint}` : ''}`,
-          savedFilePath: '',
-          speaker: '',
-          language: '',
-          mode: '',
+          // Record the failure as the turn's result rather than returning here. A
+          // toast is the only thing this path used to leave behind, and it fades — so
+          // a synthesis that died in the sidecar (an Intel XPU
+          // `UR_RESULT_ERROR_DEVICE_LOST` mid-generation, say) left the thread showing
+          // the user's message with nothing under it and no way to tell whether it had
+          // failed or was still working. ChatTtsToolResult renders `ok: false` as an
+          // error line.
+          const hint = inferenceFailureHint(extractMessage(error))
+          output = failedTtsOutput(
+            `Text To Speech failed: ${extractMessage(error)}${hint ? ` — ${hint}` : ''}`,
+          )
         }
       } finally {
         activities.end(ttsActivityId)
+        if (ttsStopControllers.get(targetKey) === stopController)
+          ttsStopControllers.delete(targetKey)
       }
 
       // Cast to the message type: the AI SDK's inferred tool-UI-part shape is wider
@@ -1102,6 +1093,7 @@ export const useOpenAiCompatibleChat = defineStore(
     async function stop() {
       const targetKey = conversations.activeKey
       manuallyStopped.value.add(targetKey)
+      ttsStopControllers.get(targetKey)?.abort()
       await chats[targetKey]?.stop()
     }
 

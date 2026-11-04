@@ -3,6 +3,9 @@ import path from 'node:path'
 import type { UIMessage, UIMessageChunk } from 'ai'
 import { appLoggerInstance } from '../observability/logger'
 import type { GuardModelSize, GuardPlacement, GuardPlan } from './guardPlacement'
+import { KIDS_BLOCKED_MESSAGE, KIDS_GUARD_UNAVAILABLE_MESSAGE } from '@/lib/kidsSafeMessages'
+
+export { KIDS_BLOCKED_MESSAGE }
 
 // ── Kids-safe text guard ──────────────────────────────────────────────────────
 //
@@ -41,10 +44,6 @@ const PLACEMENT_FAILURE_LIMIT = 2
 /** How often one check re-plans because the GPU window flipped under it before giving up. */
 const WINDOW_REPLAN_LIMIT = 3
 
-export const KIDS_BLOCKED_MESSAGE =
-  'Nie mogę w tym pomóc. Zapytaj o coś innego.\n\n' +
-  "I can't help with that. Try asking about something else."
-
 /** Shown on a tool card whose result the guard blocked, so the card is not left blank. */
 export const KIDS_TOOL_OUTPUT_BLOCKED_MESSAGE =
   'Wynik tego narzędzia został ukryty ze względów bezpieczeństwa.\n\n' +
@@ -57,10 +56,6 @@ export const KIDS_TOOL_OUTPUT_STOPPED_MESSAGE =
 
 /** Agent turns stream outside the chat guard, so the kids-safe build keeps them off. */
 export const KIDS_SAFE_AGENT_MODE_DISABLED = true
-
-const KIDS_GUARD_UNAVAILABLE_MESSAGE =
-  'Filtr bezpieczeństwa nie działa, więc ta prośba została zablokowana.\n\n' +
-  'The safety filter is not available, so this request was blocked.'
 
 // Explicit words and Polish slang the guard model misses ("cycki", "dopalacze").
 // Stems match any ending; whole words match only as written.

@@ -20,7 +20,12 @@ function base64ToBlob(base64: string, mediaType?: string): Blob {
   return new Blob([bytes], mediaType ? { type: mediaType } : undefined)
 }
 
+/** Requests still being worked on, so a stopped turn can cancel its own. */
+const running = new Map<string, AbortController>()
+
 async function handleRequest(request: ChatAskPayload): Promise<void> {
+  const controller = new AbortController()
+  running.set(request.requestId, controller)
   try {
     switch (request.kind) {
       case 'speech-synthesize': {
@@ -28,6 +33,7 @@ async function handleRequest(request: ChatAskPayload): Promise<void> {
           text: request.text,
           voice: request.voice,
           onPhase: (phase) => respond({ requestId: request.requestId, progress: true, phase }),
+          signal: controller.signal,
         })
         respond({ requestId: request.requestId, result: clip satisfies SpeechClipPayload })
         break
@@ -48,6 +54,8 @@ async function handleRequest(request: ChatAskPayload): Promise<void> {
       requestId: request.requestId,
       error: error instanceof Error ? error.message : String(error),
     })
+  } finally {
+    running.delete(request.requestId)
   }
 }
 
@@ -59,5 +67,8 @@ export function startChatAskBridge(): void {
   started = true
   window.electronAPI.chat.onAsk((payload) => {
     void handleRequest(payload)
+  })
+  window.electronAPI.chat.onAskCancel(({ requestId }) => {
+    running.get(requestId)?.abort()
   })
 }

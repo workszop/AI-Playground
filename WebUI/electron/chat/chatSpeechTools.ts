@@ -4,7 +4,6 @@ import { saveGeneratedAudioFile } from '../persist/audioFiles'
 import { filePartToBase64, findLatestAttachment } from './chatFileParts'
 import { trackChatToolActivity, updateChatToolActivity } from './chatToolActivity'
 import { askRenderer } from './chatAsk'
-import { blockedMessageFor, checkKidsPrompt, isBlocked } from '../safety/kidsGuard'
 import type { SpeechClipPayload, SpeechVoiceSelection } from '@/types/chatRequests'
 
 /**
@@ -18,6 +17,9 @@ import type { SpeechClipPayload, SpeechVoiceSelection } from '@/types/chatReques
  */
 
 export const CHAT_SPEECH_TOOLS = new Set(['synthesizeTextToSpeech', 'transcribeAudio'])
+
+/** A Stop during synthesis (or its kids-safe input check) is reported as this, not an error. */
+export const SPEECH_STOPPED_MESSAGE = 'Text to Speech was stopped.'
 
 export type SynthesizeSpeechOutput = {
   ok: boolean
@@ -59,11 +61,6 @@ async function synthesize(options: {
     return { ok: false, message: 'No text to speak.' }
   }
   try {
-    // Kids-safe build: the words to speak and the voice description are judged before
-    // any audio is made, whatever the stream guard later shows of this call.
-    const spoken = [text, args.instruct].filter((part) => typeof part === 'string' && part.trim())
-    const verdict = await checkKidsPrompt(spoken.join('\n'), options.abortSignal)
-    if (isBlocked(verdict)) return { ok: false, message: blockedMessageFor(verdict) }
     return await trackChatToolActivity(
       {
         category: 'tools',
@@ -113,6 +110,7 @@ async function synthesize(options: {
       },
     )
   } catch (error) {
+    if (options.abortSignal?.aborted) return { ok: false, message: SPEECH_STOPPED_MESSAGE }
     return { ok: false, message: error instanceof Error ? error.message : String(error) }
   }
 }

@@ -381,12 +381,20 @@ export const CHANNELS = {
     args: [] as unknown as readonly [ChatSummarizeRequest],
     result: null as unknown as IpcDataResult<string>,
   },
-  /** Kids-safe guard check of text typed for Text to Speech, before any audio is made. */
-  'chat:checkSpeechText': {
+  /** Kids-safe check of speech input (words + voice description) before any audio is made. */
+  'chat:checkSpeechInput': {
+    kind: 'invoke',
+    owner: 'main',
+    args: [] as unknown as readonly [string, string],
+    result: null as unknown as
+      { blocked: false } | { blocked: true; message: string } | { cancelled: true },
+  },
+  /** Stop a running speech input check (Stop pressed). */
+  'chat:cancelSpeechInputCheck': {
     kind: 'invoke',
     owner: 'main',
     args: [] as unknown as readonly [string],
-    result: null as unknown as { blocked: false } | { blocked: true; message: string },
+    result: null as unknown as void,
   },
   /** The renderer's answer to a `chat:ask` question, keyed by requestId. */
   'chat:answer': {
@@ -400,6 +408,12 @@ export const CHANNELS = {
     kind: 'push',
     owner: 'main',
     payload: null as unknown as ChatAskPayload,
+  },
+  /** The turn behind a `chat:ask` question was stopped; the renderer drops that work. */
+  'chat:askCancel': {
+    kind: 'push',
+    owner: 'main',
+    payload: null as unknown as { requestId: string },
   },
 
   // ── Artifact pipeline (step 5): resolved runs in, settled results out ──

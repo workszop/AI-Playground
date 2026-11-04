@@ -12,6 +12,7 @@ import {
   synthesizeSpeech,
 } from '@/lib/synthesizeSpeech'
 import { markdownToSpeechText } from '@/lib/markdownToSpeech'
+import { KIDS_GUARD_UNAVAILABLE_MESSAGE } from '@/lib/kidsSafeMessages'
 import type {
   Qwen3TtsLanguage,
   Qwen3TtsSpeakerId,
@@ -76,6 +77,43 @@ export type SynthesizeClipRequest = {
   voice?: SpeechVoiceRequest
   /** Engine phase signal for activity-driven callers (the TTS tool). */
   onPhase?: (phase: 'loading-model' | 'generating') => void
+  /** Stop: cancels the input check and skips synthesis if it has not started. */
+  signal?: AbortSignal
+}
+
+/** Thrown when the kids-safe guard blocks speech input; `message` is what to show. */
+export class SpeechInputBlockedError extends Error {}
+
+function abortError(): DOMException {
+  return new DOMException('Text to Speech was stopped', 'AbortError')
+}
+
+/**
+ * Kids-safe check of speech input before any audio is made: the words and the
+ * voice description, judged by the guard in main. Throws
+ * {@link SpeechInputBlockedError} when blocked or when the guard cannot be
+ * asked (fail closed), and an AbortError when `signal` stops it.
+ */
+export async function checkSpeechInput(
+  parts: (string | undefined)[],
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) throw abortError()
+  const text = parts.filter((part) => part?.trim()).join('\n')
+  const requestId = crypto.randomUUID()
+  const cancel = () => void window.electronAPI.chat.cancelSpeechInputCheck(requestId)
+  signal?.addEventListener('abort', cancel, { once: true })
+  let result: Awaited<ReturnType<typeof window.electronAPI.chat.checkSpeechInput>>
+  try {
+    result = await window.electronAPI.chat.checkSpeechInput(requestId, text)
+  } catch {
+    if (signal?.aborted) throw abortError()
+    throw new SpeechInputBlockedError(KIDS_GUARD_UNAVAILABLE_MESSAGE)
+  } finally {
+    signal?.removeEventListener('abort', cancel)
+  }
+  if ('cancelled' in result || signal?.aborted) throw abortError()
+  if (result.blocked) throw new SpeechInputBlockedError(result.message)
 }
 
 /**
@@ -141,6 +179,17 @@ export async function transcribe(req: { audio: Blob }): Promise<TranscriptResult
 export async function synthesizeClip(req: SynthesizeClipRequest): Promise<SpeechClipResult> {
   const tts = useTextToSpeech()
   const text = req.text
+
+  // Kids-safe build: every clip a person or a tool asks for passes the guard first.
+  const description =
+    tts.selectedEngine === 'qwen3'
+      ? useQwen3TextToSpeech().voiceDescriptionFor({
+          mode: req.voice?.mode,
+          voiceName: req.voice?.voiceName,
+          instruct: req.voice?.instruct,
+        })
+      : undefined
+  await checkSpeechInput([text, description], req.signal)
 
   if (tts.selectedEngine === 'qwen3') {
     const qwen3 = useQwen3TextToSpeech()

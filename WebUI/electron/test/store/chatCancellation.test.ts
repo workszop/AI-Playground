@@ -8,12 +8,11 @@ const state = vi.hoisted(() => ({
   streams: new Map<string, ReadableStreamDefaultController<UIMessageChunk>>(),
   report: vi.fn((error: unknown) => error),
   ttsPreset: false,
-  synthesizeClip: vi.fn(async () => ({ engine: 'external', audioBase64: '', voice: 'test' })),
-  checkSpeechText: vi.fn(
-    async (_text: string): Promise<{ blocked: false } | { blocked: true; message: string }> => ({
-      blocked: false,
-    }),
+  synthesizeClip: vi.fn(
+    async (_req: { text: string; signal?: AbortSignal }) =>
+      ({ engine: 'external', audioBase64: '', voice: 'test' }) as const,
   ),
+  SpeechInputBlockedError: class SpeechInputBlockedError extends Error {},
 }))
 
 vi.mock('@/assets/js/store/conversations', () => ({
@@ -67,6 +66,7 @@ vi.mock('@/assets/js/tools/comfyUiImageEdit', () => ({
 vi.mock('@/assets/js/speech/speechIO', () => ({
   readyTranscriptionForInput: vi.fn(),
   synthesizeClip: state.synthesizeClip,
+  SpeechInputBlockedError: state.SpeechInputBlockedError,
   synthesizeToolAvailable: () => false,
   saveSpeechClip: async () => '/tmp/speech.wav',
   transcribe: vi.fn(),
@@ -96,9 +96,8 @@ describe('conversation-scoped chat cancellation', () => {
     state.streams.clear()
     state.report.mockClear()
     state.ttsPreset = false
-    state.synthesizeClip.mockClear()
-    state.checkSpeechText.mockReset()
-    state.checkSpeechText.mockResolvedValue({ blocked: false })
+    state.synthesizeClip.mockReset()
+    state.synthesizeClip.mockResolvedValue({ engine: 'external', audioBase64: '', voice: 'test' })
     const conversationList: Record<string, unknown[]> = { local: [], remote: [] }
     state.conversations = reactive({
       activeKey: 'local',
@@ -112,7 +111,6 @@ describe('conversation-scoped chat cancellation', () => {
     vi.stubGlobal('window', {
       electronAPI: {
         getKernelSnapshot: async () => ({ state: { chatTurns: [] } }),
-        chat: { checkSpeechText: state.checkSpeechText },
       },
     })
   })
@@ -188,21 +186,23 @@ describe('conversation-scoped chat cancellation', () => {
     })
   })
 
-  it('checks the typed text before synthesizing speech', async () => {
+  it('passes a Stop signal to the speech boundary, which runs the kids-safe check', async () => {
     state.ttsPreset = true
     const chat = useOpenAiCompatibleChat()
     await chat.generate('Read this aloud')
-    expect(state.checkSpeechText).toHaveBeenCalledWith('Read this aloud')
-    expect(state.synthesizeClip).toHaveBeenCalledTimes(1)
+    expect(state.synthesizeClip).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Read this aloud', signal: expect.any(AbortSignal) }),
+    )
     expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({ output: { ok: true } })
   })
 
-  it('shows the blocked message and makes no audio when the guard blocks the text', async () => {
+  it('shows the blocked message without a toast when the guard blocks the text', async () => {
     state.ttsPreset = true
-    state.checkSpeechText.mockResolvedValue({ blocked: true, message: 'Blocked by the guard' })
+    state.synthesizeClip.mockRejectedValue(
+      new state.SpeechInputBlockedError('Blocked by the guard'),
+    )
     const chat = useOpenAiCompatibleChat()
     await chat.generate('something unsafe')
-    expect(state.synthesizeClip).not.toHaveBeenCalled()
     expect(state.report).not.toHaveBeenCalled()
     const messages = chat.getMessagesForKey('local')
     expect(messages).toHaveLength(2)
@@ -212,20 +212,52 @@ describe('conversation-scoped chat cancellation', () => {
     })
   })
 
-  it('blocks the text when the guard cannot be reached', async () => {
+  it('records a stopped turn, not audio, when Stop is pressed during the check', async () => {
     state.ttsPreset = true
-    state.checkSpeechText.mockRejectedValue(new Error('ipc gone'))
+    state.synthesizeClip.mockImplementation(
+      (req) =>
+        new Promise((_resolve, reject) =>
+          req.signal?.addEventListener('abort', () =>
+            reject(new DOMException('stopped', 'AbortError')),
+          ),
+        ),
+    )
     const chat = useOpenAiCompatibleChat()
-    await chat.generate('Read this aloud')
-    expect(state.synthesizeClip).not.toHaveBeenCalled()
+    const turn = chat.generate('Read this aloud')
+    await vi.waitFor(() => expect(state.synthesizeClip).toHaveBeenCalled())
+    await chat.stop()
+    await turn
+    expect(state.report).not.toHaveBeenCalled()
     expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({
-      output: { ok: false, message: expect.stringContaining('safety filter is not available') },
+      output: { ok: false, message: 'Text to Speech was stopped.' },
+    })
+  })
+
+  it('drops a clip that finished after Stop', async () => {
+    state.ttsPreset = true
+    let finish!: () => void
+    state.synthesizeClip.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ engine: 'external', audioBase64: '', voice: 'test' })
+        }),
+    )
+    const chat = useOpenAiCompatibleChat()
+    const turn = chat.generate('Read this aloud')
+    await vi.waitFor(() => expect(state.synthesizeClip).toHaveBeenCalled())
+    await chat.stop()
+    finish()
+    await turn
+    expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({
+      output: { ok: false, message: 'Text to Speech was stopped.', savedFilePath: '' },
     })
   })
 
   it('checks the text again when speech is regenerated', async () => {
     state.ttsPreset = true
-    state.checkSpeechText.mockResolvedValue({ blocked: true, message: 'Blocked by the guard' })
+    state.synthesizeClip.mockRejectedValue(
+      new state.SpeechInputBlockedError('Blocked by the guard'),
+    )
     const history = state.conversations.conversationList as Record<string, unknown[]>
     history.local = [
       { id: 'question', role: 'user', parts: [{ type: 'text', text: 'Read this aloud' }] },
@@ -233,7 +265,9 @@ describe('conversation-scoped chat cancellation', () => {
     ]
     const chat = useOpenAiCompatibleChat()
     await chat.regenerate('audio')
-    expect(state.synthesizeClip).not.toHaveBeenCalled()
+    expect(state.synthesizeClip).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Read this aloud' }),
+    )
     expect(chat.getMessagesForKey('local')?.[1].parts[0]).toMatchObject({
       output: { ok: false, message: 'Blocked by the guard' },
     })

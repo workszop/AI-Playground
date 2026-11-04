@@ -49,7 +49,7 @@ It covers only what a user of the app can see or hear. Security bugs, privacy an
 
 - Video presets: the prompt and every frame are checked, but the soundtrack LTX-2.3 generates is not.
 - 3D model presets: the generated model and its textures are not checked. The image filter applies only to still-image and video presets.
-- Text to Speech: the typed text is checked, but the generated audio is not. Neither is the voice description typed in the TTS settings (voice design).
+- Text to Speech: the words and the voice description are checked, but the generated audio is not.
 - Speech to Text shows the transcript without a check. This includes the transcript of an audio file the user uploads.
 
 ### Chat tools

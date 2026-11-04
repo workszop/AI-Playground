@@ -43,6 +43,15 @@ const qwenSynthesizeMock = vi.fn(async () => ({
 }))
 const qwenApplyUserVoicePreferenceMock = vi.fn(async () => {})
 const qwenSaveWavToDiskMock = vi.fn(async () => '/audio/clip.wav')
+const qwenVoiceDescriptionForMock = vi.fn(
+  (_args: { mode?: string; voiceName?: string; instruct?: string }): string | undefined =>
+    undefined,
+)
+type SpeechCheck = { blocked: false } | { blocked: true; message: string } | { cancelled: true }
+const checkSpeechInputMock = vi.fn(
+  async (_requestId: string, _text: string): Promise<SpeechCheck> => ({ blocked: false }),
+)
+const cancelSpeechInputCheckMock = vi.fn(async (_requestId: string) => {})
 
 const transcribeAudioBufferMock = vi.fn(async () => 'buffer transcript')
 const transcribeAudioBlobMock = vi.fn(async () => 'blob transcript')
@@ -84,6 +93,7 @@ vi.mock('@/assets/js/store/qwen3TextToSpeech', () => ({
     synthesize: qwenSynthesizeMock,
     applyUserVoicePreference: qwenApplyUserVoicePreferenceMock,
     saveWavToDisk: qwenSaveWavToDiskMock,
+    voiceDescriptionFor: qwenVoiceDescriptionForMock,
   }),
 }))
 vi.mock('@/lib/transcribe', () => ({
@@ -116,7 +126,9 @@ const {
   synthesizeToolAvailable,
   transcribe,
   transcriptionAvailable,
+  SpeechInputBlockedError,
 } = await import('@/assets/js/speech/speechIO')
+const { KIDS_GUARD_UNAVAILABLE_MESSAGE } = await import('@/lib/kidsSafeMessages')
 
 /** A minimal RIFF/WAVE header so `transcribe` takes the no-re-encode path. */
 function wavBlob(): Blob {
@@ -158,7 +170,17 @@ describe('speechIO (Speech I/O adapter)', () => {
       voice: 'af_heart',
       apiKey: '',
     })
-    vi.stubGlobal('window', { electronAPI: { saveGeneratedAudio: saveGeneratedAudioMock } })
+    checkSpeechInputMock.mockResolvedValue({ blocked: false })
+    qwenVoiceDescriptionForMock.mockReturnValue(undefined)
+    vi.stubGlobal('window', {
+      electronAPI: {
+        saveGeneratedAudio: saveGeneratedAudioMock,
+        chat: {
+          checkSpeechInput: checkSpeechInputMock,
+          cancelSpeechInputCheck: cancelSpeechInputCheckMock,
+        },
+      },
+    })
     ;(globalThis as Record<string, unknown>).Audio = FakeAudio
     ;(globalThis.URL as typeof globalThis.URL & { revokeObjectURL?: unknown }).revokeObjectURL =
       vi.fn()
@@ -288,6 +310,79 @@ describe('speechIO (Speech I/O adapter)', () => {
         language: 'German',
         mode: 'custom_voice',
       })
+    })
+  })
+
+  describe('synthesizeClip kids-safe input check', () => {
+    it('judges the words and the voice description before synthesizing', async () => {
+      qwenVoiceDescriptionForMock.mockReturnValue('a calm narrator')
+      await synthesizeClip({ text: 'hello', voice: { voiceName: 'Tammy' } })
+      expect(qwenVoiceDescriptionForMock).toHaveBeenCalledWith({
+        mode: undefined,
+        voiceName: 'Tammy',
+        instruct: undefined,
+      })
+      expect(checkSpeechInputMock).toHaveBeenCalledWith(
+        expect.any(String),
+        'hello\na calm narrator',
+      )
+      expect(qwenSynthesizeMock).toHaveBeenCalled()
+    })
+
+    it('makes no audio and throws the guard message when blocked', async () => {
+      checkSpeechInputMock.mockResolvedValue({ blocked: true, message: 'Blocked' })
+      const attempt = synthesizeClip({ text: 'bad words' })
+      await expect(attempt).rejects.toBeInstanceOf(SpeechInputBlockedError)
+      await expect(attempt).rejects.toThrow('Blocked')
+      expect(qwenEnsureModelLoadedMock).not.toHaveBeenCalled()
+      expect(qwenSynthesizeMock).not.toHaveBeenCalled()
+    })
+
+    it('checks Kokoro / external input too, without a voice description', async () => {
+      ttsEngine.value = 'kokoro'
+      checkSpeechInputMock.mockResolvedValue({ blocked: true, message: 'Blocked' })
+      await expect(synthesizeClip({ text: 'bad words' })).rejects.toThrow('Blocked')
+      expect(checkSpeechInputMock).toHaveBeenCalledWith(expect.any(String), 'bad words')
+      expect(qwenVoiceDescriptionForMock).not.toHaveBeenCalled()
+      expect(synthesizeToWavMock).not.toHaveBeenCalled()
+    })
+
+    it('blocks when the guard cannot be asked (fail closed)', async () => {
+      checkSpeechInputMock.mockRejectedValue(new Error('ipc gone'))
+      await expect(synthesizeClip({ text: 'hello' })).rejects.toThrow(
+        KIDS_GUARD_UNAVAILABLE_MESSAGE,
+      )
+      expect(qwenSynthesizeMock).not.toHaveBeenCalled()
+    })
+
+    it('cancels the check on Stop and makes no audio', async () => {
+      let finish!: (result: SpeechCheck) => void
+      checkSpeechInputMock.mockImplementation(
+        () => new Promise<SpeechCheck>((resolve) => (finish = resolve)),
+      )
+      const controller = new AbortController()
+      const attempt = synthesizeClip({ text: 'hello', signal: controller.signal })
+      await vi.waitFor(() => expect(checkSpeechInputMock).toHaveBeenCalled())
+      controller.abort()
+      const requestId = checkSpeechInputMock.mock.calls[0][0]
+      expect(cancelSpeechInputCheckMock).toHaveBeenCalledWith(requestId)
+      finish({ cancelled: true })
+      await expect(attempt).rejects.toMatchObject({ name: 'AbortError' })
+      expect(qwenSynthesizeMock).not.toHaveBeenCalled()
+    })
+
+    it('makes no audio when stopped while a safe verdict was on its way', async () => {
+      let finish!: (result: SpeechCheck) => void
+      checkSpeechInputMock.mockImplementation(
+        () => new Promise<SpeechCheck>((resolve) => (finish = resolve)),
+      )
+      const controller = new AbortController()
+      const attempt = synthesizeClip({ text: 'hello', signal: controller.signal })
+      await vi.waitFor(() => expect(checkSpeechInputMock).toHaveBeenCalled())
+      controller.abort()
+      finish({ blocked: false })
+      await expect(attempt).rejects.toMatchObject({ name: 'AbortError' })
+      expect(qwenSynthesizeMock).not.toHaveBeenCalled()
     })
   })
 

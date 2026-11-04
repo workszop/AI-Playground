@@ -40,7 +40,10 @@
     {
       "type": "vae",
       "model": "Comfy-Org/Wan_2.1_ComfyUI_repackaged/split_files/vae/wan_2.1_vae.safetensors"
-    }
+    },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/config.json" },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors" },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json" }
   ],
   "settings": [
     {
@@ -147,7 +150,10 @@
           {
             "type": "lora",
             "model": "Kijai/WanVideo_comfy/Wan21_CausVid_14B_T2V_lora_rank32.safetensors"
-          }
+          },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/config.json" },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors" },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json" }
         ],
         "settings": [
           {
@@ -295,10 +301,15 @@
               "title": "CLIPLoader (GGUF)"
             }
           },
+          "9176": {
+            "inputs": { "image": ["119", 0], "threshold": 0.4 },
+            "class_type": "SafetyChecker",
+            "_meta": { "title": "Intercept NSFW Outputs" }
+          },
           "176": {
             "inputs": {
               "fps": 16,
-              "images": ["119", 0]
+              "images": ["9176", 0]
             },
             "class_type": "CreateVideo",
             "_meta": {
@@ -424,10 +435,15 @@
               "title": "Save Video"
             }
           },
+          "9043": {
+            "inputs": { "image": ["8", 0], "threshold": 0.4 },
+            "class_type": "SafetyChecker",
+            "_meta": { "title": "Intercept NSFW Outputs" }
+          },
           "43": {
             "inputs": {
               "fps": 16,
-              "images": ["8", 0],
+              "images": ["9043", 0],
               "audio": ["41", 1]
             },
             "class_type": "CreateVideo",

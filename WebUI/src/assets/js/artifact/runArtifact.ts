@@ -363,7 +363,8 @@ export async function runArtifact(
   // stubs so the history shows no permanent placeholders.
   if (result.state === 'failed' && result.items.length === 0) {
     if (result.blocked) {
-      // The guard refused the prompt: keep the stubs as a failed generation that shows the message.
+      // The guard refused the prompt or the image filter the output: keep the stubs as a failed
+      // generation that shows the message.
       imageGen.failGeneration(result.error ?? 'Generation failed')
     } else if (
       result.error === 'Another generation is already in progress' ||

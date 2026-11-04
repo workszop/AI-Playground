@@ -56,7 +56,10 @@
     {
       "type": "checkpoints",
       "model": "unsloth/LTX-2.3-GGUF/vae/ltx-2.3-22b-distilled_audio_vae.safetensors"
-    }
+    },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/config.json" },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors" },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json" }
   ],
   "settings": [
     {
@@ -344,10 +347,15 @@
       "class_type": "CM_IntToFloat",
       "_meta": { "title": "Frame rate (float)" }
     },
+    "9242": {
+      "inputs": { "image": ["251", 0], "threshold": 0.4 },
+      "class_type": "SafetyChecker",
+      "_meta": { "title": "Intercept NSFW Outputs" }
+    },
     "242": {
       "inputs": {
         "fps": ["261", 0],
-        "images": ["251", 0],
+        "images": ["9242", 0],
         "audio": ["220", 0]
       },
       "class_type": "CreateVideo",

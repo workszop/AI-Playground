@@ -71,6 +71,8 @@ import {
   checkedImageOutputs,
   IMAGE_FILTER_MISSING_MESSAGE,
   imageFilterProblem,
+  isMediaBlockedError,
+  MEDIA_BLOCKED_MESSAGE,
 } from '../safety/imageFilter'
 
 const appLogger = appLoggerInstance
@@ -382,7 +384,7 @@ function finish(run: ActiveRun, result: ArtifactRunResult): void {
   run.settle(result)
 }
 
-function failRun(run: ActiveRun, message: string, interrupt: boolean): void {
+function failRun(run: ActiveRun, message: string, interrupt: boolean, blocked = false): void {
   if (run.settled) return
   if (run.cancelRequested) {
     void settleCancelledAfterCleanup(run)
@@ -401,7 +403,12 @@ function failRun(run: ActiveRun, message: string, interrupt: boolean): void {
     void clearQueue(baseUrl, clientDeps()).catch(() => {})
   }
   settleItems(run, 'failed')
-  finish(run, { state: 'failed', items: doneItems(run), error: message })
+  finish(run, {
+    state: 'failed',
+    items: doneItems(run),
+    error: message,
+    ...(blocked ? { blocked: true } : {}),
+  })
 }
 
 function cancelRun(run: ActiveRun): void {
@@ -776,11 +783,9 @@ function handleWebsocketMessage(run: ActiveRun, msg: unknown): void {
         'animated' in output &&
         Array.isArray(output.animated) &&
         output.animated[output.images.indexOf(image)]
-      // Kids-safe build: an image is shown only when it came out of the image filter. Video
-      // presets are not filtered yet (KIDS-SAFE.md), so only they may return animated images.
-      const exempt = animated && run.payload.preset.mediaType === 'video'
-      if (image && !exempt && !run.checkedOutputs.has(String(parsed.data.node))) {
-        appLogger.warn(`Unfiltered image from node ${String(parsed.data.node)}`, 'kids-guard')
+      // Kids-safe build: an image or video is shown only when it came out of the image filter.
+      if ((image || video) && !run.checkedOutputs.has(String(parsed.data.node))) {
+        appLogger.warn(`Unfiltered media from node ${String(parsed.data.node)}`, 'kids-guard')
         failRun(run, IMAGE_FILTER_MISSING_MESSAGE, true)
         break
       }
@@ -817,6 +822,14 @@ function handleWebsocketMessage(run: ActiveRun, msg: unknown): void {
       checkCompletion(run)
       break
     case 'execution_error': {
+      if (isMediaBlockedError(parsed.data.exception_message)) {
+        appLogger.warn(
+          `Image filter blocked the output of node ${String(parsed.data.node_id)}`,
+          'kids-guard',
+        )
+        failRun(run, MEDIA_BLOCKED_MESSAGE, false, true)
+        break
+      }
       const userMessage = summarizeComfyExecutionError(parsed.data)
       appLogger.error(
         `ComfyUI execution error: ${parsed.data.exception_type}: ${parsed.data.exception_message}`,

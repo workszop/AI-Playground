@@ -47,8 +47,8 @@ It covers only what a user of the app can see or hear. Security bugs, privacy an
 
 ### Media without an output filter
 
-- Video presets: the prompt is checked, but the generated video is not.
-- 3D model presets: the generated model and its textures are not checked. The image filter applies only to still-image presets.
+- Video presets: the prompt and every frame are checked, but the soundtrack LTX-2.3 generates is not.
+- 3D model presets: the generated model and its textures are not checked. The image filter applies only to still-image and video presets.
 - Text to Speech speaks typed text without a check.
 - Speech to Text shows the transcript without a check. This includes the transcript of an audio file the user uploads.
 
@@ -60,7 +60,7 @@ It covers only what a user of the app can see or hear. Security bugs, privacy an
 
 ### Inputs the user provides
 
-- Images attached to a chat (for vision models), documents added for RAG and source images for Image Edit are not checked. Only the text or images the app generates from them are checked.
+- Images attached to a chat (for vision models), documents added for RAG, source images for Image Edit and the source image or video for image-to-video and Video2Video are not checked. Only the text or images the app generates from them are checked.
 
 ### Filter accuracy
 

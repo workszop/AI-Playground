@@ -9,13 +9,16 @@ Ten fork [intel/AI-Playground](https://github.com/intel/AI-Playground) dodaje fi
 | Wiadomość wpisana przez użytkownika na czacie | Lista słów (polskich i angielskich), a potem ocena promptu przez Qwen3Guard-Gen-4B, zanim uruchomi się jakikolwiek model |
 | Odpowiedź czatu | Pokazywana kawałkami. Każdy kawałek ocenia Qwen3Guard (razem z pytaniem i końcówką już pokazanego tekstu), zanim się wyświetli. Zablokowany kawałek nigdy się nie pojawia: odpowiedź się urywa i dochodzi komunikat o blokadzie. Tekst rozumowania modelu („thinking”) nigdy się nie wyświetla |
 | Wywołanie narzędzia w czacie (MCP, przeglądarka, narzędzia multimedialne) | Tekst wejścia narzędzia (np. zapytanie wyszukiwarki) ocenia Qwen3Guard, zanim karta narzędzia w ogóle się pojawi; zablokowane wywołanie nie wyświetla się wcale, odpowiedź się urywa i dochodzi komunikat o blokadzie. Tekst wyniku ocenia tak samo jak odpowiedź, zanim się wyświetli. Zablokowany wynik nigdy się nie pojawia: na karcie narzędzia zostaje komunikat „Wynik tego narzędzia został ukryty ze względów bezpieczeństwa”, odpowiedź się urywa i dochodzi komunikat o blokadzie. Stop w trakcie sprawdzania wyniku zostawia na karcie „Sprawdzanie wyniku tego narzędzia zostało przerwane” |
-| Prompt obrazu (panel obrazów i narzędzie obrazów w czacie) | To samo sprawdzenie promptu, zanim ruszy ComfyUI |
+| Prompt obrazu lub filmu (panele obrazów i wideo, narzędzia multimedialne w czacie) | To samo sprawdzenie promptu, zanim ruszy ComfyUI |
 | Wygenerowany obraz | Węzeł `SafetyChecker` (vit-base-nsfw-detector) na każdym obrazie z serii, z progiem zablokowanym na 0,4 (czułość 0,6). Obejmuje też warianty OpenVINO, Colorize, Change Face i Upscale |
-| Nienaruszalność filtra obrazów | Przed każdym generowaniem obrazu aplikacja sprawdza workflow, który ma wysłać: każdy węzeł, który zapisuje lub podgląda obrazy (`SaveImage`, każdy inny węzeł `*Save*` przyjmujący obrazy, nawet jeśli przekazuje je dalej, a w presetach obrazów także `PreviewImage` i każdy inny węzeł kończący graf, do którego wchodzą obrazy), musi dostawać je prosto z węzła `SafetyChecker` z progiem 0,4 lub niższym, inaczej generowanie zostaje odrzucone, zanim ComfyUI zapisze cokolwiek na dysk. Obraz z każdego innego węzła nigdy się nie wyświetla (animacje są dozwolone tylko w presetach wideo, których nic nie filtruje). Pliki węzła `SafetyChecker` są porównywane z kopią wbudowaną w aplikację i przywracane (z ponownym uruchomieniem ComfyUI), jeśli ktoś je zmienił |
+| Wygenerowany film | Ten sam węzeł `SafetyChecker` z tym samym progiem ocenia każdą klatkę, zanim `CreateVideo` złoży z nich film. Obejmuje wszystkie presety wideo: LTX-Video, LTX-2.3, LTX-2.3-i2v, Wan2.1-VACE i Wan2.2-i2v, z każdym wariantem |
+| Nienaruszalność filtra obrazów | Przed każdym generowaniem obrazu lub filmu aplikacja sprawdza workflow, który ma wysłać: każdy węzeł, który zapisuje lub podgląda obrazy (`SaveImage`, każdy inny węzeł `*Save*` przyjmujący obrazy, nawet jeśli przekazuje je dalej, `PreviewImage` i każdy inny węzeł kończący graf, do którego wchodzą obrazy lub klatki), musi dostawać je prosto z węzła `SafetyChecker` z progiem 0,4 lub niższym. Każdy węzeł zapisujący film (`SaveVideo` i inne węzły `*Save*` przyjmujące film) musi dostawać go z węzła, który złożył go z klatek prosto z takiego `SafetyChecker`. Inaczej generowanie zostaje odrzucone, zanim ComfyUI zapisze cokolwiek na dysk. Obraz ani film z każdego innego węzła nigdy się nie wyświetla. Pliki węzła `SafetyChecker` są porównywane z kopią wbudowaną w aplikację i przywracane (z ponownym uruchomieniem ComfyUI), jeśli ktoś je zmienił |
 | Podgląd na żywo | Nigdy się nie wyświetla, bo to niefiltrowane klatki pośrednie |
 | Tryb agenta (Agent, Game Agent, Quick Coder) | Wyłączony, bo odpowiedzi agenta nie przechodzą przez filtr czatu |
 
-Kontrola nienaruszalności odrzuca dwa rodzaje presetów, które zapisują obrazy bez węzła `SafetyChecker` przed zapisem: partnerski preset Acer VisionArt (zapisuje obraz własnym węzłem Acera) i presety „Dummy Image” oraz „Dummy Edit”, dostępne tylko w trybie deweloperskim.
+Kontrola nienaruszalności odrzuca partnerski preset Acer VisionArt, który zapisuje obraz własnym węzłem Acera bez węzła `SafetyChecker` przed zapisem. Testowe presety „Dummy Image”, „Dummy Edit” i „Dummy Video”, dostępne tylko w trybie deweloperskim, przechodzą przez `SafetyChecker`.
+
+Gdy `SafetyChecker` zablokuje obraz albo film, generowanie się zatrzymuje, nic nie trafia na dysk, a zamiast wyniku pojawia się komunikat: „Ten obraz lub film nie przeszedł filtra bezpieczeństwa, więc nie został pokazany. / This image or video didn't pass the safety filter, so it wasn't shown.” Dotyczy to też obrazów i filmów z narzędzi w czacie. Jedna klatka powyżej progu blokuje cały film, a jeden obraz powyżej progu całą serię.
 
 Na zablokowaną prośbę aplikacja odpowiada: „Nie mogę w tym pomóc. Zapytaj o coś innego. / I can't help with that. Try asking about something else.” Blokują oba werdykty modelu: „Unsafe” i „Controversial”. Zatrzymanie odpowiedzi przyciskiem Stop w trakcie sprawdzania nie jest blokadą: odpowiedź po prostu się kończy, bez komunikatu.
 
@@ -24,7 +27,7 @@ Na zablokowaną prośbę aplikacja odpowiada: „Nie mogę w tym pomóc. Zapytaj
 - Musi być zainstalowany backend Llama.cpp. Model bezpieczeństwa działa na osobnym llama-serverze dostępnym tylko lokalnie (loopback) i nigdy nie używa parametrów uruchomienia ustawionych przez użytkownika.
 - Przy pierwszym użyciu aplikacja prosi w jednym oknie o pobranie obu modeli bezpieczeństwa: `mradermacher/Qwen3Guard-Gen-4B-GGUF` (Q4_K_M, około 2,7 GB) i `QuantFactory/Qwen3Guard-Gen-0.6B-GGUF` (Q8_0, około 0,8 GB). Dzięki temu model zapasowy nigdy nie pobiera się w trakcie pracy. Dopóki nie pobierze się przynajmniej jeden z nich, czat i generowanie obrazów są zablokowane.
 - Pomiary na zintegrowanej grafice Intel Core Ultra 5 135U z modelem czatu Qwen3.5-4B: sprawdzenie promptu trwa około 2 s. Pierwsza część odpowiedzi pojawia się po około 20 s (bez filtra po 3–4 s), a odpowiedź o długości 1650 znaków jest w całości widoczna po około 77 s (bez filtra po około 55 s). Ponieważ model bezpieczeństwa dzieli kartę graficzną z modelem czatu, generowanie zwalnia o około 25%. Na procesorze model bezpieczeństwa działał na tym laptopie jeszcze wolniej.
-- Presety obrazów pobierają `AdamCodd/vit-base-nsfw-detector`, tak jak w oryginalnej aplikacji.
+- Presety obrazów pobierają `AdamCodd/vit-base-nsfw-detector`, tak jak w oryginalnej aplikacji. Presety wideo pobierają ten sam model.
 
 ## Gdzie działa model bezpieczeństwa
 
@@ -48,7 +51,7 @@ Aplikacja wybiera miejsce dla modelu bezpieczeństwa na podstawie sprzętu i pr�
 - `WebUI/electron/safety/guardPlacement.ts`, `WebUI/electron/safety/guardFacts.ts`, `WebUI/electron/safety/cpuTopology.ts`: zasady wyboru miejsca, dane o sprzęcie, z których korzystają, i liczba wątków procesora.
 - `WebUI/electron/adapters/backends/llamaCppBackendService.ts`: `ensureGuardServer` (pomija parametry uruchomienia ustawione przez użytkownika).
 - `WebUI/electron/chat/turnEngine.ts` (prompty i odpowiedzi czatu) oraz `WebUI/electron/kernel/orchestrator.ts` (prompty obrazów): miejsca, w których sprawdzany jest tekst.
-- `comfyui-deps/custom_nodes/SafetyChecker/nodes.py` i presety w `modes/base/`: filtr wygenerowanych obrazów.
+- `comfyui-deps/custom_nodes/SafetyChecker/nodes.py` i presety w `modes/base/`: filtr wygenerowanych obrazów i filmów.
 - `WebUI/electron/safety/imageFilter.ts` i `WebUI/electron/artifact/runner.ts`: kontrola nienaruszalności filtra obrazów.
 
 ## Modele i licencje
@@ -70,9 +73,9 @@ Aplikacja nie zawiera modeli. Pobiera je z Hugging Face dopiero przy pierwszym u
 
 Żaden filtr nie jest doskonały. W zestawie 50 polskich promptów model 4B razem z listą słów przepuścił 0 z 30 szkodliwych i zablokował 1 z 20 niewinnych (rodzina w strojach kąpielowych na basenie). Zestaw jest mały, więc te liczby to tylko wskazówka. Najsłabszy punkt to krótki polski slang i właśnie dla niego istnieje lista słów.
 
-Próg 0,4 dla obrazów wybrano na podstawie testu na 136 obrazach (bez obrazów jednoznacznie dla dorosłych). Zablokował wszystkie 11 obrazów ze strojami kąpielowymi, bielizną i leżącymi nagimi postaciami, ale też mniej więcej co piąty niewinny obraz wygenerowany z niewinnych promptów testowych (model SD1.5 często rysuje „dziewczynkę”, „syrenę” czy „baletnicę” jako wystylizowane dorosłe kobiety) i 5 z 64 niewinnych zdjęć. Zablokowany obraz wraca czarny.
+Próg 0,4 dla obrazów wybrano na podstawie testu na 136 obrazach (bez obrazów jednoznacznie dla dorosłych). Zablokował wszystkie 11 obrazów ze strojami kąpielowymi, bielizną i leżącymi nagimi postaciami, ale też mniej więcej co piąty niewinny obraz wygenerowany z niewinnych promptów testowych (model SD1.5 często rysuje „dziewczynkę”, „syrenę” czy „baletnicę” jako wystylizowane dorosłe kobiety) i 5 z 64 niewinnych zdjęć. Próg dla klatek filmu jest ten sam, ale nie był osobno testowany na filmach.
 
-Presety wideo i zamiana tekstu na mowę nie są filtrowane.
+Filtr filmów ocenia tylko obraz: dźwięk, który tworzy LTX-2.3, nie jest sprawdzany. Obraz lub film źródłowy podany do presetów image-to-video i Video2Video też nie jest sprawdzany, tylko wynik. Zamiana tekstu na mowę nie jest filtrowana.
 
 Używaj aplikacji razem z osobnym kontem użytkownika bez uprawnień administratora i z kontrolą rodzicielską systemu. Użytkownik z uprawnieniami administratora może zmienić samą aplikację. Presety obrazów i pliki węzłów ComfyUI są kopiowane do folderu, w którym każdy użytkownik może zapisywać. Zmiany, które usuwają albo osłabiają filtr obrazów, wyłapuje opisana wyżej kontrola nienaruszalności, ale ktoś, kto umie pisać w Pythonie, nadal mógłby zmienić w tym folderze samo ComfyUI albo model wykrywający. Filtr tekstu i kontrola nienaruszalności są częścią plików programu, więc przy instalacji dla wszystkich użytkowników pozostają chronione.
 

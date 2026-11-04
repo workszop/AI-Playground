@@ -14,7 +14,7 @@ const TEST_ONLY_NOTE =
   'Only pick it when the user explicitly asks for a dummy, test or fast workflow — never for ' +
   'a genuine media request.'
 
-// The kids-safe build refuses any still-image workflow whose saved images skip a SafetyChecker.
+// The kids-safe build refuses any workflow whose saved images or video frames skip a SafetyChecker.
 const NSFW_DETECTOR_MODELS = ['config.json', 'model.safetensors', 'preprocessor_config.json'].map(
   (file) => ({ type: 'nsfwdetector' as const, model: `AdamCodd/vit-base-nsfw-detector/${file}` }),
 )
@@ -157,7 +157,7 @@ const dummyVideoPreset: ComfyUiPreset = {
   toolInstructions: TEST_ONLY_NOTE,
   requiredCustomNodes: [],
   requiredPythonPackages: [],
-  requiredModels: [],
+  requiredModels: NSFW_DETECTOR_MODELS,
   resolutionConfig: dummyResolutionConfig,
   settings: [
     promptSetting,
@@ -196,9 +196,10 @@ const dummyVideoPreset: ComfyUiPreset = {
       inputs: { width: 512, height: 288, batch_size: 8, color: 8388736 },
       _meta: { title: 'Empty Image' },
     },
+    '4': safetyCheckerNode('1'),
     '2': {
       class_type: 'CreateVideo',
-      inputs: { images: ['1', 0], fps: 8 },
+      inputs: { images: ['4', 0], fps: 8 },
       _meta: { title: 'Create Video' },
     },
     '3': {

@@ -6,6 +6,8 @@ import {
   checkedImageOutputs,
   IMAGE_NSFW_THRESHOLD,
   imageFilterProblem,
+  isMediaBlockedError,
+  MEDIA_BLOCKED_MARKER,
   restoreSafetyCheckerNode,
   safetyThreshold,
 } from '../../safety/imageFilter'
@@ -97,21 +99,70 @@ describe('imageFilterProblem', () => {
     expect(imageFilterProblem(wf, 'image')).toMatch(/no image output/)
   })
 
-  it('leaves a video preset whose output node takes images alone', () => {
-    const video = {
+  function videoWorkflow(threshold: unknown = 0.4): ComfyUIApiWorkflow {
+    return {
+      '1': { class_type: 'VAEDecode', inputs: {} },
+      '2': { class_type: 'SafetyChecker', inputs: { image: ['1', 0], threshold } },
+      '3': { class_type: 'CreateVideo', inputs: { images: ['2', 0], fps: 24 } },
+      '4': { class_type: 'SaveVideo', inputs: { video: ['3', 0] } },
+    } as unknown as ComfyUIApiWorkflow
+  }
+
+  it('accepts a video whose frames pass a SafetyChecker', () => {
+    const wf = videoWorkflow()
+    expect(imageFilterProblem(wf, 'video')).toBeNull()
+    expect(checkedImageOutputs(wf).has('4')).toBe(true)
+  })
+
+  it('refuses a video whose frames skip the SafetyChecker', () => {
+    const wf = videoWorkflow()
+    ;(wf['3'] as { inputs: Record<string, unknown> }).inputs.images = ['1', 0]
+    expect(imageFilterProblem(wf, 'video')).toMatch(/SaveVideo node 4 is not fed/)
+  })
+
+  it('refuses a video checked with a loose threshold', () => {
+    expect(imageFilterProblem(videoWorkflow(0.9), 'video')).toMatch(/threshold above/)
+  })
+
+  it('refuses a video saved from an unchecked source', () => {
+    const wf = {
+      '1': { class_type: 'LoadVideo', inputs: { file: 'input.mp4' } },
+      '2': { class_type: 'SaveVideo', inputs: { video: ['1', 0] } },
+    } as unknown as ComfyUIApiWorkflow
+    expect(imageFilterProblem(wf, 'video')).toMatch(/SaveVideo node 2 is not fed/)
+  })
+
+  it('refuses a frame combiner that takes unchecked frames', () => {
+    const wf = {
       '1': { class_type: 'VAEDecode', inputs: {} },
       '2': { class_type: 'VHS_VideoCombine', inputs: { images: ['1', 0] } },
     } as unknown as ComfyUIApiWorkflow
-    expect(imageFilterProblem(video, 'video')).toBeNull()
-    expect(imageFilterProblem(video, 'image')).toMatch(/VHS_VideoCombine node 2 is not fed/)
+    expect(imageFilterProblem(wf, 'video')).toMatch(/VHS_VideoCombine node 2 is not fed/)
   })
 
-  it('leaves video workflows alone', () => {
-    const video = {
-      '1': { class_type: 'VAEDecode', inputs: {} },
-      '2': { class_type: 'SaveVideo', inputs: { video: ['1', 0] } },
-    } as unknown as ComfyUIApiWorkflow
-    expect(imageFilterProblem(video, 'video')).toBeNull()
+  it('refuses a video workflow with no checked output', () => {
+    const wf = videoWorkflow()
+    delete wf['4']
+    delete wf['3']
+    ;(wf as Record<string, unknown>)['5'] = {
+      class_type: 'ImageScale',
+      inputs: { image: ['2', 0] },
+    }
+    expect(imageFilterProblem(wf, 'video')).toMatch(/no video output/)
+  })
+})
+
+describe('isMediaBlockedError', () => {
+  it('spots the SafetyChecker marker', () => {
+    expect(isMediaBlockedError(`${MEDIA_BLOCKED_MARKER} score=0.912`)).toBe(true)
+    expect(isMediaBlockedError('CUDA out of memory')).toBe(false)
+    expect(isMediaBlockedError(undefined)).toBe(false)
+  })
+
+  it('matches the marker the shipped node raises', () => {
+    const node = readFileSync(path.join(SHIPPED_NODE_DIR, 'nodes.py'), 'utf-8')
+    expect(node).toContain(`BLOCKED_MARKER = "${MEDIA_BLOCKED_MARKER}"`)
+    expect(node).not.toContain('zeros_like')
   })
 })
 

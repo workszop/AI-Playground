@@ -47,7 +47,10 @@
     {
       "type": "clip",
       "model": "Comfy-Org/Wan_2.1_ComfyUI_repackaged/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
-    }
+    },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/config.json" },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors" },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json" }
   ],
   "settings": [
     {
@@ -159,7 +162,10 @@
           {
             "type": "lora",
             "model": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors"
-          }
+          },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/config.json" },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors" },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json" }
         ],
         "comfyUiApiWorkflow": {
           "84": {
@@ -309,10 +315,15 @@
             "class_type": "VAEDecode",
             "_meta": { "title": "VAE Decode" }
           },
+          "9094": {
+            "inputs": { "image": ["87", 0], "threshold": 0.4 },
+            "class_type": "SafetyChecker",
+            "_meta": { "title": "Intercept NSFW Outputs" }
+          },
           "94": {
             "inputs": {
               "fps": 16,
-              "images": ["87", 0]
+              "images": ["9094", 0]
             },
             "class_type": "CreateVideo",
             "_meta": { "title": "Create Video" }
@@ -499,10 +510,15 @@
             "class_type": "VAEDecode",
             "_meta": { "title": "VAE Decode" }
           },
+          "9094": {
+            "inputs": { "image": ["87", 0], "threshold": 0.4 },
+            "class_type": "SafetyChecker",
+            "_meta": { "title": "Intercept NSFW Outputs" }
+          },
           "94": {
             "inputs": {
               "fps": 16,
-              "images": ["87", 0]
+              "images": ["9094", 0]
             },
             "class_type": "CreateVideo",
             "_meta": { "title": "Create Video" }

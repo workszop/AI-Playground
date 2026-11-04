@@ -15,15 +15,19 @@
 #
 # Modified to use local model paths from ComfyUI's
 # folder_paths instead of HuggingFace Hub for offline capability.
-# Modified for the kids-safe build to check every image in the batch.
+# Modified for the kids-safe build to check every image in the batch and to stop
+# the run instead of blacking out the batch, so nothing is saved and the app can
+# say why.
 
 import os
 
 import folder_paths
 import numpy as np
-import torch
 from PIL import Image
 from transformers import pipeline
+
+# The app matches this text in ComfyUI's execution_error to show its blocked message.
+BLOCKED_MARKER = "AIPG_KIDS_SAFE_BLOCKED"
 
 
 class SafetyChecker:
@@ -64,10 +68,10 @@ class SafetyChecker:
             next(item["score"] for item in res if item["label"] == "nsfw")
             for res in result
         )
-        output = image
         if float(score) > threshold:
-            output = torch.zeros_like(image)  # black out the whole batch
-        return (output, str(score))
+            # One frame over the threshold blocks the whole batch or video.
+            raise RuntimeError(f"{BLOCKED_MARKER} score={float(score):.3f}")
+        return (image, str(score))
 
 
 NODE_CLASS_MAPPINGS = {"SafetyChecker": SafetyChecker}

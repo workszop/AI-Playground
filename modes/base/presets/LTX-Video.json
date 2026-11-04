@@ -40,7 +40,10 @@
     {
       "type": "clip",
       "model": "city96/t5-v1_1-xxl-encoder-gguf/t5-v1_1-xxl-encoder-Q4_K_M.gguf"
-    }
+    },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/config.json" },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors" },
+    { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json" }
   ],
   "settings": [
     {
@@ -313,10 +316,15 @@
         "title": "frame_rate"
       }
     },
+    "9113": {
+      "inputs": { "image": ["8", 0], "threshold": 0.4 },
+      "class_type": "SafetyChecker",
+      "_meta": { "title": "Intercept NSFW Outputs" }
+    },
     "113": {
       "inputs": {
         "fps": ["112", 0],
-        "images": ["8", 0]
+        "images": ["9113", 0]
       },
       "class_type": "CreateVideo",
       "_meta": {
@@ -350,7 +358,10 @@
           {
             "type": "clip",
             "model": "comfyanonymous/flux_text_encoders/t5xxl_fp8_e4m3fn.safetensors"
-          }
+          },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/config.json" },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors" },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json" }
         ],
         "settings": [
           {
@@ -492,10 +503,15 @@
               "title": "Save Video"
             }
           },
+          "9079": {
+            "inputs": { "image": ["8", 0], "threshold": 0.4 },
+            "class_type": "SafetyChecker",
+            "_meta": { "title": "Intercept NSFW Outputs" }
+          },
           "79": {
             "inputs": {
               "fps": ["81", 0],
-              "images": ["8", 0]
+              "images": ["9079", 0]
             },
             "class_type": "CreateVideo",
             "_meta": {
@@ -531,7 +547,10 @@
           {
             "type": "clip",
             "model": "city96/t5-v1_1-xxl-encoder-gguf/t5-v1_1-xxl-encoder-Q4_K_M.gguf"
-          }
+          },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/config.json" },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/model.safetensors" },
+          { "type": "nsfwdetector", "model": "AdamCodd/vit-base-nsfw-detector/preprocessor_config.json" }
         ],
         "settings": [
           {
@@ -766,10 +785,15 @@
               "title": "frame_rate"
             }
           },
+          "9091": {
+            "inputs": { "image": ["8", 0], "threshold": 0.4 },
+            "class_type": "SafetyChecker",
+            "_meta": { "title": "Intercept NSFW Outputs" }
+          },
           "91": {
             "inputs": {
               "fps": ["89", 0],
-              "images": ["8", 0]
+              "images": ["9091", 0]
             },
             "class_type": "CreateVideo",
             "_meta": {

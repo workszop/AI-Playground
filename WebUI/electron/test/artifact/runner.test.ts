@@ -62,7 +62,11 @@ import {
   submitArtifactRun,
 } from '../../kernel/orchestrator'
 import { blockedMessageFor, checkKidsPrompt } from '../../safety/kidsGuard'
-import { IMAGE_FILTER_MISSING_MESSAGE } from '../../safety/imageFilter'
+import {
+  IMAGE_FILTER_MISSING_MESSAGE,
+  MEDIA_BLOCKED_MARKER,
+  MEDIA_BLOCKED_MESSAGE,
+} from '../../safety/imageFilter'
 import {
   resetKernelBusForTest,
   setKernelEventWindow,
@@ -900,6 +904,113 @@ describe('artifact runner', () => {
     const result = await run
     expect(result.state).toBe('failed')
     expect(result.error).toBe(IMAGE_FILTER_MISSING_MESSAGE)
+  })
+
+  function videoPreset(): ComfyUiPreset {
+    const p = preset()
+    p.mediaType = 'video'
+    p.comfyUiApiWorkflow = {
+      ...p.comfyUiApiWorkflow,
+      '4': {
+        class_type: 'CreateVideo',
+        inputs: { images: ['3', 0], fps: 8 },
+        _meta: { title: 'Create Video' },
+      },
+      '5': {
+        class_type: 'SaveVideo',
+        inputs: { video: ['4', 0], filename_prefix: 'AIPG_Video', format: 'auto', codec: 'auto' },
+        _meta: { title: 'Save Video' },
+      },
+    } as never
+    return p
+  }
+
+  function videoRun() {
+    const request = payload({
+      mode: 'video',
+      preset: videoPreset(),
+      params: { ...payload().params, batchSize: 1 },
+    })
+    return submitArtifactRun({ ...request, items: itemsFor(request) })
+  }
+
+  // Core SaveVideo reports its file as an animated image; VideoHelperSuite nodes report gifs.
+  const videoOutputs = {
+    animated: (node: string) => ({
+      type: 'executed',
+      data: {
+        node,
+        output: {
+          images: [{ filename: 'clip.mp4', subfolder: '', type: 'output' }],
+          animated: [true],
+        },
+      },
+    }),
+    gifs: (node: string) => ({
+      type: 'executed',
+      data: {
+        node,
+        output: {
+          gifs: [
+            {
+              filename: 'clip.mp4',
+              subfolder: '',
+              type: 'output',
+              workflow: 'clip.png',
+              format: 'video/h264-mp4',
+            },
+          ],
+        },
+      },
+    }),
+  }
+  const videoForms = Object.entries(videoOutputs)
+
+  it.each(videoForms)(
+    'shows a video (%s) whose frames passed the image filter',
+    async (_f, out) => {
+      setArtifactRunnerDeps(deps())
+      const run = videoRun()
+      await vi.waitFor(() => expect(submittedPrompts).toHaveLength(1))
+      socketHandlers!.onJson(out('5'))
+      const result = await run
+      expect(result.state).toBe('completed')
+      expect(result.items[0]).toMatchObject({ type: 'video', state: 'done' })
+    },
+  )
+
+  it.each(videoForms)('fails the run when a video (%s) skips the image filter', async (_f, out) => {
+    setArtifactRunnerDeps(deps())
+    const run = videoRun()
+    await vi.waitFor(() => expect(submittedPrompts).toHaveLength(1))
+    socketHandlers!.onJson(out('9'))
+    const result = await run
+    expect(result.state).toBe('failed')
+    expect(result.error).toBe(IMAGE_FILTER_MISSING_MESSAGE)
+    expect(result.items).toHaveLength(0)
+  })
+
+  it.each([
+    ['image', () => submitArtifactRun(payload())],
+    ['video', videoRun],
+  ])('shows the blocked message when the image filter stops a %s run', async (_kind, start) => {
+    setArtifactRunnerDeps(deps())
+    const run = start()
+    await vi.waitFor(() => expect(submittedPrompts.length).toBeGreaterThan(0))
+    socketHandlers!.onJson({
+      type: 'execution_error',
+      data: {
+        node_id: '3',
+        node_type: 'SafetyChecker',
+        exception_type: 'RuntimeError',
+        exception_message: `${MEDIA_BLOCKED_MARKER} score=0.913`,
+      },
+    })
+    const result = await run
+    expect(result.state).toBe('failed')
+    expect(result.error).toBe(MEDIA_BLOCKED_MESSAGE)
+    expect(result.blocked).toBe(true)
+    expect(result.items).toHaveLength(0)
   })
 
   it('restarts a running ComfyUI after restoring changed SafetyChecker files', async () => {

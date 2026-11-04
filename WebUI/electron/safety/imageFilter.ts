@@ -1,9 +1,11 @@
 /**
  * Kids-safe image filter check. Presets and the SafetyChecker node files are
  * copied to a folder every user can write to, so each run verifies what is
- * actually sent to ComfyUI: every saved still image comes straight out of a
- * SafetyChecker whose threshold is at most IMAGE_NSFW_THRESHOLD, and the node
- * code ComfyUI loads is the code shipped inside the app.
+ * actually sent to ComfyUI: every saved image and every saved video's frames
+ * come straight out of a SafetyChecker whose threshold is at most
+ * IMAGE_NSFW_THRESHOLD, and the node code ComfyUI loads is the code shipped
+ * inside the app. A SafetyChecker that blocks stops the run with
+ * MEDIA_BLOCKED_MARKER, so nothing is saved.
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -17,6 +19,18 @@ export const IMAGE_NSFW_THRESHOLD = 0.4
 export const IMAGE_FILTER_MISSING_MESSAGE =
   'Filtr obrazów jest wyłączony albo zmieniony, więc obraz nie został wygenerowany.\n\n' +
   'The image safety filter is missing or changed, so no image was generated.'
+
+/** Text the SafetyChecker node puts in its error when it blocks (see its nodes.py). */
+export const MEDIA_BLOCKED_MARKER = 'AIPG_KIDS_SAFE_BLOCKED'
+
+export const MEDIA_BLOCKED_MESSAGE =
+  'Ten obraz lub film nie przeszedł filtra bezpieczeństwa, więc nie został pokazany.\n\n' +
+  "This image or video didn't pass the safety filter, so it wasn't shown."
+
+/** Whether a ComfyUI execution error is the SafetyChecker blocking the output. */
+export function isMediaBlockedError(exceptionMessage: string | undefined): boolean {
+  return typeof exceptionMessage === 'string' && exceptionMessage.includes(MEDIA_BLOCKED_MARKER)
+}
 
 const SAFETY_NODE_CLASS = 'SafetyChecker'
 const SAFETY_NODE_DIR = 'SafetyChecker'
@@ -59,25 +73,39 @@ function isStrictSafetyChecker(workflow: ComfyUIApiWorkflow, node: WorkflowNode 
   return threshold !== undefined && threshold <= IMAGE_NSFW_THRESHOLD + THRESHOLD_EPSILON
 }
 
-/** Ids of the nodes whose `images` come straight from a SafetyChecker's image output. */
+function fedByChecker(workflow: ComfyUIApiWorkflow, node: WorkflowNode | undefined): boolean {
+  const images = node?.inputs?.images
+  return (
+    isLink(images) &&
+    images[1] === 0 &&
+    isStrictSafetyChecker(workflow, nodeOf(workflow, images[0]))
+  )
+}
+
+/**
+ * Ids of the nodes whose `images` come straight from a SafetyChecker's image
+ * output, plus the video savers whose `video` comes from a node fed that way
+ * (`CreateVideo` from checked frames).
+ */
 export function checkedImageOutputs(workflow: ComfyUIApiWorkflow): Set<string> {
   const checked = new Set<string>()
   for (const [id, node] of Object.entries(workflow) as [string, WorkflowNode][]) {
-    const images = node.inputs?.images
-    if (!isLink(images) || images[1] !== 0) continue
-    if (isStrictSafetyChecker(workflow, nodeOf(workflow, images[0]))) checked.add(id)
+    if (fedByChecker(workflow, node)) checked.add(id)
+    const video = node.inputs?.video
+    if (isLink(video) && video[1] === 0 && fedByChecker(workflow, nodeOf(workflow, video[0]))) {
+      checked.add(id)
+    }
   }
   return checked
 }
 
 /**
- * Ids of the nodes that write images to disk: every `*SaveImage*`, every
- * `*Save*` node that takes `images` (some savers pass them onward too), and in
- * a still-image workflow every node that takes `images` and feeds nothing else
- * (savers and previews of any class). Video presets are unfiltered by design,
- * and their output node takes the frames as `images`.
+ * Ids of the nodes that write images or videos to disk: every `*SaveImage*`,
+ * every `*Save*` node that takes `images` or `video` (some savers pass them
+ * onward too), and every node that takes `images` and feeds nothing else
+ * (savers, previews and frame combiners of any class).
  */
-function imageSinks(workflow: ComfyUIApiWorkflow, mediaType: string | undefined): Set<string> {
+function mediaSinks(workflow: ComfyUIApiWorkflow): Set<string> {
   const consumed = new Set<string>()
   for (const node of Object.values(workflow) as WorkflowNode[]) {
     for (const value of Object.values(node.inputs ?? {})) {
@@ -88,8 +116,10 @@ function imageSinks(workflow: ComfyUIApiWorkflow, mediaType: string | undefined)
   for (const [id, node] of Object.entries(workflow) as [string, WorkflowNode][]) {
     const className = typeof node.class_type === 'string' ? node.class_type : ''
     const takesImages = isLink(node.inputs?.images)
-    const saver = className.includes('SaveImage') || (/save/i.test(className) && takesImages)
-    const terminalImages = mediaType !== 'video' && takesImages && !consumed.has(id)
+    const takesVideo = isLink(node.inputs?.video)
+    const saver =
+      className.includes('SaveImage') || (/save/i.test(className) && (takesImages || takesVideo))
+    const terminalImages = takesImages && !consumed.has(id)
     if (saver || terminalImages) sinks.add(id)
   }
   return sinks
@@ -107,11 +137,15 @@ export function imageFilterProblem(
     }
   }
   const checked = checkedImageOutputs(workflow)
-  for (const id of imageSinks(workflow, mediaType)) {
+  for (const id of mediaSinks(workflow)) {
     if (!checked.has(id))
       return `${String(workflow[id]?.class_type)} node ${id} is not fed by a SafetyChecker`
   }
-  if (mediaType === 'image' && checked.size === 0) return 'no image output passes a SafetyChecker'
+  // An empty workflow (a base preset whose variants carry the graph) saves nothing.
+  const savesMedia = (mediaType === 'image' || mediaType === 'video') && nodes.length > 0
+  if (savesMedia && checked.size === 0) {
+    return `no ${mediaType} output passes a SafetyChecker`
+  }
   return null
 }
 

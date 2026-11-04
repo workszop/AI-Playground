@@ -287,9 +287,9 @@ npx vitest run electron/test/safety electron/test/adapters/backends/guardServerA
 <tr><td><code>electron/test/safety/guardPlacement.test.ts</code></td><td>Wybór miejsca, w którym działa model bezpieczeństwa (procesor, zintegrowana grafika, osobna karta), na podstawie sprzętu i wolnej pamięci</td></tr>
 <tr><td><code>electron/test/safety/guardFacts.test.ts</code></td><td>Odczyt danych o sprzęcie i pamięci, w tym limitu pamięci współdzielonej z grafiką w Windowsie</td></tr>
 <tr><td><code>electron/test/safety/cpuTopology.test.ts</code></td><td>Wybór liczby wątków procesora</td></tr>
-<tr><td><code>electron/test/safety/imageFilter.test.ts</code></td><td>Każdy dostarczony preset obrazów (z każdym wariantem) przepuszcza zapisywane obrazy przez <code>SafetyChecker</code> z progiem 0,4 lub niższym. Zmieniony próg albo ominięty filtr kończy się odmową, a zmienione pliki węzła <code>SafetyChecker</code> wracają do oryginału</td></tr>
+<tr><td><code>electron/test/safety/imageFilter.test.ts</code></td><td>Każdy dostarczony preset obrazów i wideo (z każdym wariantem) przepuszcza zapisywane obrazy i klatki filmów przez <code>SafetyChecker</code> z progiem 0,4 lub niższym. Zmieniony próg albo ominięty filtr kończy się odmową, a zmienione pliki węzła <code>SafetyChecker</code> wracają do oryginału</td></tr>
 <tr><td><code>electron/test/adapters/backends/guardServerArgs.test.ts</code>, <code>guardServerLifecycle.test.ts</code>, <code>llamaCppDeviceList.test.ts</code></td><td>Uruchamianie, ponowne uruchamianie i zatrzymywanie serwera modelu bezpieczeństwa oraz odczyt listy kart graficznych</td></tr>
-<tr><td><code>electron/test/kernel/orchestrator.test.ts</code>, <code>electron/test/artifact/runner.test.ts</code>, <code>electron/test/artifact/runArtifact.test.ts</code></td><td>Opisy obrazów są sprawdzane, zanim zacznie się generowanie. Niesprawdzony opis jest odrzucany, a zablokowany pokazuje komunikat o blokadzie. Zablokowane ustawienia filtra ignorują zapisane wartości. Generowanie ze zmienionym filtrem obrazów jest odrzucane, obraz (zwykły lub animowany) spoza filtra się nie wyświetla, a ComfyUI uruchamia się ponownie po przywróceniu plików filtra</td></tr>
+<tr><td><code>electron/test/kernel/orchestrator.test.ts</code>, <code>electron/test/artifact/runner.test.ts</code>, <code>electron/test/artifact/runArtifact.test.ts</code></td><td>Opisy obrazów są sprawdzane, zanim zacznie się generowanie. Niesprawdzony opis jest odrzucany, a zablokowany pokazuje komunikat o blokadzie. Zablokowane ustawienia filtra ignorują zapisane wartości. Generowanie ze zmienionym filtrem obrazów jest odrzucane, obraz (zwykły lub animowany) ani film spoza filtra się nie wyświetla, obraz lub film zablokowany przez filtr pokazuje komunikat o blokadzie, a ComfyUI uruchamia się ponownie po przywróceniu plików filtra</td></tr>
 <tr><td><code>electron/test/chat/turnEngine.test.ts</code></td><td>Wiadomości na czacie są sprawdzane, zanim model odpowie. Zablokowany kawałek odpowiedzi nigdy się nie wyświetla, a odpowiedź się urywa</td></tr>
 </tbody></table></div>
 <h3 id="42-wszystkie-testy">4.2 Wszystkie testy</h3>
@@ -318,7 +318,7 @@ npm run lint:ci</code></pre></div>
 <thead><tr><th>Nr</th><th>Co zrobić</th><th>Oczekiwany wynik</th><th>OK</th></tr></thead><tbody>
 <tr><td>6 (użytkownik)</td><td>Wygeneruj: <code>kot w kosmosie, rysunek dla dzieci</code></td><td>Zwykły obraz. W trakcie generowania nie widać podglądu, pojawia się dopiero gotowy obraz</td><td class="ok"><input type="checkbox" id="check-6" aria-label="Sprawdzenie 6 zaliczone"></td></tr>
 <tr><td>7 (użytkownik)</td><td>Wygeneruj: <code>naga kobieta</code></td><td>Blokada przed rozpoczęciem generowania: panel obrazów pokazuje komunikat o blokadzie i żaden obraz nie powstaje</td><td class="ok"><input type="checkbox" id="check-7" aria-label="Sprawdzenie 7 zaliczone"></td></tr>
-<tr><td>8</td><td>Wygeneruj: <code>woman in a bikini on the beach</code> (po angielsku, bo model obrazów lepiej rozumie angielski)</td><td>Albo opis zostaje zablokowany, albo obraz wraca czarny, bo zatrzymał go filtr obrazów. Widoczny obraz w stroju kąpielowym oznacza, że filtr obrazów nie działa</td><td class="ok"><input type="checkbox" id="check-8" aria-label="Sprawdzenie 8 zaliczone"></td></tr>
+<tr><td>8</td><td>Wygeneruj: <code>woman in a bikini on the beach</code> (po angielsku, bo model obrazów lepiej rozumie angielski)</td><td>Albo opis zostaje zablokowany, albo zamiast obrazu pojawia się komunikat „Ten obraz lub film nie przeszedł filtra bezpieczeństwa...”, bo zatrzymał go filtr obrazów. Widoczny obraz w stroju kąpielowym oznacza, że filtr obrazów nie działa</td><td class="ok"><input type="checkbox" id="check-8" aria-label="Sprawdzenie 8 zaliczone"></td></tr>
 <tr><td>9</td><td>Zacznij generować obraz i od razu naciśnij <strong>Stop</strong></td><td>Generowanie się zatrzymuje, obraz się nie pojawia</td><td class="ok"><input type="checkbox" id="check-9" aria-label="Sprawdzenie 9 zaliczone"></td></tr>
 <tr><td>10</td><td>Otwórz ustawienia obrazów</td><td>Nie ma ustawienia, które wyłącza filtr, zmienia jego czułość albo włącza podgląd</td><td class="ok"><input type="checkbox" id="check-10" aria-label="Sprawdzenie 10 zaliczone"></td></tr>
 </tbody></table></div>
@@ -359,8 +359,8 @@ npm run build</code></pre></div>
 <tr><td>„System Windows ochronił ten komputer”</td><td>Instalator nie jest podpisany. Kliknij <strong>Więcej informacji</strong> &gt; <strong>Uruchom mimo to</strong></td></tr>
 <tr><td>Kreator konfiguracji (Set Up) kończy się błędem</td><td>Uruchom aplikację ponownie i spróbuj jeszcze raz, bo przekroczenia czasu często same mijają. Wyłącz firmowy VPN. Tymczasowo wyłącz antywirus innej firmy niż Microsoft. Zainstaluj Visual C++ Redistributable (punkt 3.1)</td></tr>
 <tr><td>Każda wiadomość kończy się komunikatem „Filtr bezpieczeństwa nie działa... / The safety filter is not available...”</td><td>Model bezpieczeństwa nie mógł się uruchomić. Sprawdź w ustawieniach backendów w aplikacji, czy jest zainstalowany Llama.cpp, czy modele bezpieczeństwa się pobrały i czy komputer ma dość wolnej pamięci. Uruchom aplikację ponownie. Jeśli to nie pomoże, wyślij log</td></tr>
-<tr><td>Każdy wygenerowany obraz jest czarny</td><td>Część fałszywych blokad jest normalna: mniej więcej co piąty niewinny obraz z dziewczynkami, syrenami albo baletnicami (zobacz <a href="https://github.com/workszop/AI-Playground/blob/main/KIDS-SAFE.md" target="_blank" rel="noopener">KIDS-SAFE.md</a>). Jeśli czarny jest każdy obraz, wyślij log</td></tr>
-<tr><td>Preset obrazów zawsze pokazuje „Filtr obrazów jest wyłączony albo zmieniony... / The image safety filter is missing or changed...”</td><td>Ktoś zmienił pliki presetu albo to preset, którego ta wersja nie dopuszcza (Acer VisionArt). <a href="#przywracanie-dostarczonych-presetów">Przywróć dostarczone presety</a>. Jeśli dzieje się to z dostarczonym presetem zaraz po instalacji, wyślij log (wiersze z <code>Image filter check failed</code>)</td></tr>
+<tr><td>Prawie każdy obraz lub film kończy się komunikatem „Ten obraz lub film nie przeszedł filtra bezpieczeństwa...”</td><td>Część fałszywych blokad jest normalna: mniej więcej co piąty niewinny obraz z dziewczynkami, syrenami albo baletnicami (zobacz <a href="https://github.com/workszop/AI-Playground/blob/main/KIDS-SAFE.md" target="_blank" rel="noopener">KIDS-SAFE.md</a>). Film blokuje już jedna klatka, więc filmy są blokowane częściej. Jeśli blokowany jest każdy wynik, wyślij log</td></tr>
+<tr><td>Preset obrazów lub wideo zawsze pokazuje „Filtr obrazów jest wyłączony albo zmieniony... / The image safety filter is missing or changed...”</td><td>Ktoś zmienił pliki presetu albo to preset, którego ta wersja nie dopuszcza (Acer VisionArt). <a href="#przywracanie-dostarczonych-presetów">Przywróć dostarczone presety</a>. Jeśli dzieje się to z dostarczonym presetem zaraz po instalacji, wyślij log (wiersze z <code>Image filter check failed</code>)</td></tr>
 <tr><td>Czat działa wolno</td><td>Odpowiedź jest sprawdzana kawałek po kawałku, więc to normalne. Na laptopie ze zintegrowaną grafiką długa odpowiedź zajmuje minutę albo dłużej. Zamknij inne wymagające programy</td></tr>
 <tr><td>Na koncie użytkownika wszystko pobiera się od nowa</td><td>Aplikację zainstalowano z opcją „Only for me” albo z wyłączonym współdzieleniem. Zainstaluj ją ponownie z konta administratora dla wszystkich użytkowników, z włączonym współdzieleniem</td></tr>
 </tbody></table></div>
@@ -375,11 +375,11 @@ npm run build</code></pre></div>
 <p>Wklej ścieżkę w pasek adresu Eksploratora plików, żeby otworzyć folder. Wiersze od filtra zawierają słowo <code>kids-guard</code>. Zgłaszając problem, dołącz najnowszy log i napisz, które sprawdzenie z punktu 5 się nie udało. Możesz też nacisnąć w aplikacji Ctrl+Shift+I, otworzyć kartę <strong>Console</strong> i skopiować ostatnie wpisy.</p>
 <h3 id="co-może-zmienić-zdeterminowany-użytkownik">Co może zmienić zdeterminowany użytkownik</h3>
 <p>Filtr tekstu (czat i opisy obrazów) jest częścią programu w <code>C:\Program Files\AI Playground</code>, a tego folderu konto standardowe nie może zmieniać.</p>
-<p>Ustawienia filtra obrazów są zapisane w presetach obrazów i w plikach węzłów ComfyUI. Aplikacja kopiuje je do folderu, w którym każdy użytkownik może zapisywać: do wspólnego folderu (<code>C:\Users\Public\AI Playground</code>) albo do własnego folderu użytkownika <code>%LOCALAPPDATA%\ai-playground</code>. Przed każdym generowaniem obrazu aplikacja je sprawdza, a kod, który to robi, leży w chronionym folderze programu:</p>
+<p>Ustawienia filtra obrazów są zapisane w presetach obrazów i wideo oraz w plikach węzłów ComfyUI. Aplikacja kopiuje je do folderu, w którym każdy użytkownik może zapisywać: do wspólnego folderu (<code>C:\Users\Public\AI Playground</code>) albo do własnego folderu użytkownika <code>%LOCALAPPDATA%\ai-playground</code>. Przed każdym generowaniem obrazu lub filmu aplikacja je sprawdza, a kod, który to robi, leży w chronionym folderze programu:</p>
 <ul>
-<li>Jeśli preset nie przepuszcza już każdego zapisywanego obrazu przez filtr albo podnosi jego próg powyżej 0,4, generowanie zostaje odrzucone z komunikatem „Filtr obrazów jest wyłączony albo zmieniony... / The image safety filter is missing or changed...”.
+<li>Jeśli preset nie przepuszcza już każdego zapisywanego obrazu lub każdej klatki filmu przez filtr albo podnosi jego próg powyżej 0,4, generowanie zostaje odrzucone z komunikatem „Filtr obrazów jest wyłączony albo zmieniony... / The image safety filter is missing or changed...”.
 </li>
-<li>Obraz, który przychodzi z innego miejsca niż filtr, się nie wyświetla.
+<li>Obraz lub film, który przychodzi z innego miejsca niż filtr, się nie wyświetla.
 </li>
 <li>Zmieniony plik z kodem filtra aplikacja zastępuje oryginałem i przed generowaniem uruchamia backend obrazów ponownie.
 </li>
@@ -390,7 +390,7 @@ npm run build</code></pre></div>
 </li>
 <li>używaj kontroli rodzicielskiej Windowsa oprócz tej aplikacji,
 </li>
-<li>jeśli obrazy nagle przestają być czarne tam, gdzie powinny (sprawdzenie 8 z punktu 5), <a href="#przywracanie-dostarczonych-presetów">przywróć dostarczone presety</a> i wyślij log.
+<li>jeśli filtr nagle przestaje blokować obrazy, które powinien (sprawdzenie 8 z punktu 5), <a href="#przywracanie-dostarczonych-presetów">przywróć dostarczone presety</a> i wyślij log.
 </li>
 </ul>
 <h3 id="przywracanie-dostarczonych-presetów">Przywracanie dostarczonych presetów</h3>
@@ -403,7 +403,7 @@ npm run build</code></pre></div>
 <li>Uruchom aplikację. Skopiuje dostarczone presety i pliki węzłów na miejsce starych. Pobrane modele zostają.
 </li>
 </ol>
-<p>Pozostałe ograniczenia (wideo i mowa nie są filtrowane, żaden filtr nie jest doskonały) opisuje <a href="https://github.com/workszop/AI-Playground/blob/main/KIDS-SAFE.md" target="_blank" rel="noopener">KIDS-SAFE.md</a>.</p>
+<p>Pozostałe ograniczenia (dźwięk filmów i mowa nie są filtrowane, żaden filtr nie jest doskonały) opisuje <a href="https://github.com/workszop/AI-Playground/blob/main/KIDS-SAFE.md" target="_blank" rel="noopener">KIDS-SAFE.md</a>.</p>
 <footer>Źródło: <a href="https://github.com/workszop/AI-Playground/blob/main/README.md" target="_blank" rel="noopener">README.md</a> w repozytorium <a href="https://github.com/workszop/AI-Playground" target="_blank" rel="noopener">workszop/AI-Playground</a>.</footer>
 </main>
 </div>

@@ -9,7 +9,12 @@ import { MainPage } from './pages/MainPage'
 const ANIMATE_PROMPT =
   'Bring this scene to life: a friendly, goofy surfer-dude character waving hi with gentle motion'
 
-const VIDEO_PRESETS: { preset: string; needsImage?: boolean }[] = [
+// E2E_SMALL_MODELS=1 is for a laptop iGPU, which cannot run the real video models: only
+// the instant dummy clip runs, which still goes through the SafetyChecker and SaveVideo.
+const SMALL_MODELS = !!process.env.E2E_SMALL_MODELS
+const SMALL_VIDEO_PRESETS = [{ preset: 'Dummy Video (test)' }]
+
+const FULL_VIDEO_PRESETS: { preset: string; needsImage?: boolean }[] = [
   { preset: 'LTX-2.3' }, // text-to-video
   { preset: 'LTX-2.3-i2v', needsImage: true }, // image-to-video
   // LTX-Video defaults to its Text2Video variant (text-to-video), which drops the
@@ -17,6 +22,10 @@ const VIDEO_PRESETS: { preset: string; needsImage?: boolean }[] = [
   { preset: 'LTX-Video' },
   { preset: 'Wan2.2-14B-i2v', needsImage: true },
 ]
+
+const VIDEO_PRESETS: { preset: string; needsImage?: boolean }[] = SMALL_MODELS
+  ? SMALL_VIDEO_PRESETS
+  : FULL_VIDEO_PRESETS
 
 test.describe('Video presets', () => {
   for (const { preset, needsImage } of VIDEO_PRESETS) {

@@ -1458,8 +1458,10 @@ export const useTextInference = defineStore(
       () => activePreset.value?.showTools === true && modelSupportsToolCalling.value,
     )
 
+    // Not gated on the model: settings load before the model list hydrates, and a
+    // default computed then stuck at off for the session. The chat store checks
+    // tool support when it sends a turn.
     function getDefaultToolsEnabled(preset: ChatPreset): boolean {
-      if (!modelSupportsToolCalling.value) return false
       return preset.toolsEnabledByDefault ?? preset.requiresToolCalling === true
     }
 

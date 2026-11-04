@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { encodeGgufMetadata } from '@/lib/vram/gguf'
 import {
+  modelHasMmproj,
   readLlamaCppVramInputs,
   resolveGgufPath,
 } from '../../../adapters/vram/llamaCppVramInputs.ts'
@@ -56,6 +57,21 @@ describe('resolveGgufPath', () => {
 
   it('returns undefined for a model that is not downloaded', () => {
     expect(resolveGgufPath(makeDir(), 'owner/repo/missing.gguf')).toBeUndefined()
+  })
+})
+
+describe('modelHasMmproj', () => {
+  it('is true only once a vision projector sits beside the model', () => {
+    const dir = makeDir()
+    const model = path.join(dir, 'unsloth---Qwen3.5-4B-GGUF', 'Qwen3.5-4B-Q4_K_M.gguf')
+    writeGguf(model, 'qwen35')
+    expect(modelHasMmproj(dir, 'unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf')).toBe(false)
+    writeGguf(path.join(path.dirname(model), 'mmproj-BF16.gguf'), 'clip')
+    expect(modelHasMmproj(dir, 'unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf')).toBe(true)
+  })
+
+  it('is false for a model that is not downloaded', () => {
+    expect(modelHasMmproj(makeDir(), 'owner/repo/missing.gguf')).toBe(false)
   })
 })
 

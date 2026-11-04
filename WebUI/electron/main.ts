@@ -35,7 +35,8 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import fs from 'fs'
 import { randomUUID } from 'node:crypto'
-import { PathsManager } from './kernel/pathsManager'
+import { getSharedModelDir, PathsManager } from './kernel/pathsManager'
+import { modelHasMmproj } from './adapters/vram/llamaCppVramInputs'
 import {
   LocalSettingsSchema,
   resolveProductMode,
@@ -1320,6 +1321,10 @@ function wireChatEngine(): void {
     // Tracing hooks: no-ops in laminar.ts unless a Laminar config is present.
     noteTimings: (timings) => noteLlamaCppChatTimings(timings),
     noteTraceContext: (context) => noteMainChatTurnContext(context),
+    localVisionReady: (model) =>
+      model.backend !== 'llamaCPP' ||
+      !model.readiness ||
+      modelHasMmproj(getSharedModelDir('ggufLLM') ?? '', model.readiness.llmModelName),
   })
   setRagRetrievalDeps({
     ensureEmbeddingServerReady: async (serviceName, embeddingModel) => {

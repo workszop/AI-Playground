@@ -69,6 +69,12 @@ export function mmprojBytesFor(modelPath: string): number {
   return mmproj ? fileSize(path.join(dir, mmproj)) : 0
 }
 
+/** Whether llama-server will load a vision projector for this model when it starts. */
+export function modelHasMmproj(ggufDir: string, modelName: string): boolean {
+  const modelPath = resolveGgufPath(ggufDir, modelName)
+  return modelPath !== undefined && mmprojBytesFor(modelPath) > 0
+}
+
 /** Enough for the `<arch>.*` keys of every model in the catalog; see `archIsSettled`. */
 const ARCH_WINDOW_BYTES = 1 << 20
 

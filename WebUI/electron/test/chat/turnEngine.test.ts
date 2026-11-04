@@ -695,6 +695,34 @@ describe('turn engine', () => {
     })
   })
 
+  it('omits the result image when the local server has no vision projector loaded', async () => {
+    setChatEngineDeps({ readMediaAsDataUri, localVisionReady: () => false })
+    executeChatComfyToolMock.mockResolvedValueOnce({
+      images: [{ id: 'i1', type: 'image', imageUrl: 'aipg-media://red.png' }],
+    })
+    queueFetchMock(
+      sse(toolCallChunks('comfyUI', '{"workflow":"Draft Image","prompt":"a fox"}')),
+      sse(textChunks('done')),
+    )
+    const { turnId } = submitChatTurn(
+      turnRequest({
+        tools: [{ name: 'comfyUI', description: 'Create', inputSchema: { type: 'object' } }],
+        model: {
+          backend: 'llamaCPP',
+          modelId: 'test/model.gguf',
+          baseUrl: 'http://127.0.0.1:39101',
+          supportsVision: true,
+        },
+      }),
+    )
+    await waitForTurnDone(turnId)
+
+    const followUp = JSON.stringify(requests[1].body.messages)
+    expect(followUp).toContain('aipg-media://red.png')
+    expect(followUp).not.toContain('data:image')
+    expect(readMediaAsDataUri).not.toHaveBeenCalled()
+  })
+
   it('omits the result image when the model does not support vision', async () => {
     executeChatComfyToolMock.mockResolvedValueOnce({
       images: [

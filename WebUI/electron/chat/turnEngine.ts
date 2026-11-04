@@ -28,6 +28,7 @@ import { extractMessage } from '@/assets/js/errors/appError'
 import type { AipgUiMessage } from '@/assets/js/store/openAiCompatibleChat'
 import {
   ChatTurnRequestSchema,
+  type ChatModelConfig,
   type ChatToolSpec,
   type ChatTurnRequest,
   type ChatTurnSubmitResult,
@@ -104,12 +105,21 @@ export type ChatEngineDeps = {
   noteTraceContext?: (context: Record<string, unknown> | null) => void
   /** Tests inject retrieval; production uses `retrieveRagForTurn`. */
   prepareRag?: typeof retrieveRagForTurn
+  /** Whether the local server can read images: llama.cpp only loads a model's mmproj when it is on disk. */
+  localVisionReady?: (model: ChatModelConfig) => boolean
 }
 
 let engineDeps: ChatEngineDeps | null = null
 
 export function setChatEngineDeps(deps: ChatEngineDeps): void {
   engineDeps = deps
+}
+
+// The catalog flag says the model can see; the mmproj is only downloaded for a turn
+// that attaches an image, so a generated image must not be sent to a server without it.
+function withLocalVision(model: ChatModelConfig): ChatModelConfig {
+  if (!model.supportsVision || engineDeps?.localVisionReady?.(model) !== false) return model
+  return { ...model, supportsVision: false }
 }
 
 export function resetChatEngineDepsForTest(): void {
@@ -811,7 +821,7 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
     await persistChatTurn(request, request.messages)
 
     const userText = lastUserText(request.messages)
-    const config = request.model
+    const config = withLocalVision(request.model)
     await submitTextRequest(
       {
         runId: turnId,
@@ -872,7 +882,7 @@ async function runChatTurn(request: ChatTurnRequest, turn: ActiveChatTurn): Prom
       parentMedia: request.mediaAgent
         ? {
             catalog: request.mediaAgent,
-            model: request.model,
+            model: config,
             keepModelsLoaded,
             readMediaAsDataUri,
           }
